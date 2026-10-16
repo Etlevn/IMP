@@ -1,5 +1,10 @@
 .*
 !.gitignore
+_*/
 notes/
-
-Columbia-EarningsMovements/
+*.ipynb
+output/
+data/*
+!data/.gitkeep
+__pycache__/
+*.py[cod]
