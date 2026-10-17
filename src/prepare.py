@@ -1,4 +1,4 @@
-"""Load and merge the EM parquet tables (notebook-style, no modeling prep)."""
+"""Load and merge the earnings-movements parquet tables (no modeling prep)."""
 
 from __future__ import annotations
 

@@ -1,10 +1,10 @@
 # IMP
 
-**Identifying Market Positioning Ahead of Earnings** (Columbia IEOR / Quantmatix).
+**Identifying Market Positioning Ahead of Earnings.**
 
 Predict post-earnings stock behavior from information available **before** the announcement. The goal is not to forecast fundamentals from the earnings release itself, but to use pre-event price action and short-term signals known by a fixed decision session.
 
-This repository builds an event-study panel from Columbia Earnings Movements (CEM)–style Parquet tables, constructs fixed announcement windows and decision-day features, then trains linear, tree, and neural baselines under a shared chronological split.
+This repository builds an event-study panel from daily price, earnings, and analyst-rating Parquet tables, constructs fixed announcement windows and decision-day features, then trains linear, tree, and neural baselines under a shared chronological split.
 
 ## Features
 
@@ -28,7 +28,7 @@ Python 3.10+ is recommended.
 
 ## Data
 
-Place these files in `data/` (same layout as the CEM starter notebook). **Source tables are not redistributed with this repository**; obtain them from your data provider or course materials.
+Place these files in `data/`. **Source tables are not redistributed with this repository**; obtain them from your own data provider.
 
 | File                                     | Role                                    |
 | ---------------------------------------- | --------------------------------------- |
@@ -42,7 +42,7 @@ Optional cache written by the pipeline on first use:
 | --------------------------------- | ------------------------------------------------------- |
 | `benchmark_spy.parquet` / `.json` | Yahoo SPY adjusted close (downloaded once, then reused) |
 
-Typical coverage in the EM-style panel used during development is on the order of **~200 U.S. names, 2020–2024**. Stock returns use `LastPrice`; the file does not state whether that series is split/dividend adjusted.
+Typical coverage in the sample panel used during development is on the order of **~200 U.S. names, 2020–2024**. Stock returns use `LastPrice`; the file does not state whether that series is split/dividend adjusted.
 
 ## Quick start
 
@@ -81,7 +81,7 @@ data/*.parquet
 
 ## Design choices
 
-These choices differ from an exact-date notebook merge and a single `ShiftedReturns` label. They are intentional.
+These choices differ from an exact-date panel merge and a single next-session return label. They are intentional.
 
 ### 1. Earnings merge (exact date)
 
@@ -244,4 +244,4 @@ requirements.txt
 
 ## License and attribution
 
-Columbia IEOR / Quantmatix course project scaffolding. Data files remain subject to their original provider terms and are not included here. Cite So and Wang (2014) and Aboody et al. (2010) if you rely on the window design motivated by those papers.
+Data files remain subject to their original provider terms and are not included here. Cite So and Wang (2014) and Aboody et al. (2010) if you rely on the window design motivated by those papers.
