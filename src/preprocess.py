@@ -8,14 +8,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.features import FEATURE_COLUMNS as DEFAULT_FEATURE_COLUMNS
+from config.default import FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS
 
 ALLOWED_IMPUTE = {None, "median", "mean", "drop"}
 ALLOWED_SPLIT = {
     "EventDate",
-    "decision_session",
-    "anchor_session",
-    "release_session",
+    "DecisionDate",
+    "AnchorDate",
+    "ReleaseDate",
 }
 
 
@@ -103,7 +103,7 @@ def drop_missing_target(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, in
 
 
 def _resolve_features(feature_columns: list[str] | None, df: pd.DataFrame) -> list[str]:
-    cols = list(DEFAULT_FEATURE_COLUMNS if feature_columns is None else feature_columns)
+    cols = list(CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns)
     if not cols:
         raise ValueError("FEATURE_COLUMNS must be non-empty.")
     missing = [c for c in cols if c not in df.columns]
@@ -202,7 +202,7 @@ def run_preprocess(
     *,
     target: str,
     feature_columns: list[str] | None = None,
-    split_column: str = "EventDate",
+    split_column: str = "DecisionDate",
     train_end: str = "2022-12-31",
     val_end: str | None = None,
     impute_strategy: str | None = "median",

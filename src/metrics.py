@@ -191,8 +191,8 @@ def format_summary_for_display(table: pd.DataFrame) -> pd.DataFrame:
     """Compact cross-model SUMMARY (test fold only).
 
     Keeps family-specific leading columns (e.g. ``alpha``, ``hidden``) and
-    formats the shared metric block like METRICS. Quintiles / val columns are
-    intentionally omitted.
+    formats the shared metric block like METRICS. Includes test
+    ``top_minus_bottom`` when present (NaN if quintiles were skipped).
     """
     metric_keys = {
         "n_test",
@@ -207,6 +207,7 @@ def format_summary_for_display(table: pd.DataFrame) -> pd.DataFrame:
         "ic",
         "rank_ic",
         "hit_rate",
+        "top_minus_bottom",
     }
     lead_cols = [c for c in table.columns if c not in metric_keys]
     rows: list[dict[str, object]] = []
@@ -223,6 +224,8 @@ def format_summary_for_display(table: pd.DataFrame) -> pd.DataFrame:
         out["ic"] = _fmt4(row["ic"])
         out["rank_ic"] = _fmt4(row["rank_ic"])
         out["hit_rate"] = _fmt4(row["hit_rate"])
+        if "top_minus_bottom" in row.index:
+            out["top_minus_bottom"] = _fmt4(row["top_minus_bottom"])
         rows.append(out)
     return pd.DataFrame(rows)
 
@@ -256,6 +259,104 @@ def print_summary_table(table: pd.DataFrame) -> None:
         False,
     ):
         print(display.to_string(index=False))
+
+
+def _test_top_minus_bottom(quintiles: pd.DataFrame | None) -> float:
+    """Test-fold ``top_minus_bottom`` from a quintile table, or NaN if missing."""
+    if quintiles is None or quintiles.empty or "fold" not in quintiles.columns:
+        return float("nan")
+    if "top_minus_bottom" not in quintiles.columns:
+        return float("nan")
+    part = quintiles.loc[quintiles["fold"].eq("test"), "top_minus_bottom"]
+    if part.empty:
+        return float("nan")
+    return float(part.iloc[0])
+
+
+def summary_row_from_fold_metrics(
+    model_type: str,
+    fold_metrics: pd.DataFrame,
+    *,
+    quintiles: pd.DataFrame | None = None,
+    **extra: float | int | str,
+) -> dict[str, float | int | str]:
+    """One comparison row: family extras + test-fold metrics (CSV / SUMMARY)."""
+    test = fold_metrics.loc["test"]
+    row: dict[str, float | int | str] = {"model": model_type, **extra}
+    row.update(
+        {
+            "n_test": int(test["n"]),
+            "r2": float(test["r2"]),
+            "oos_r2": float(test["oos_r2"]),
+            "rmse": float(test["rmse"]),
+            "mae": float(test["mae"]),
+            "rmse_train_mean": float(test["rmse_train_mean"]),
+            "mae_train_mean": float(test["mae_train_mean"]),
+            "rmse_zero": float(test["rmse_zero"]),
+            "mae_zero": float(test["mae_zero"]),
+            "ic": float(test["ic"]),
+            "rank_ic": float(test["rank_ic"]),
+            "hit_rate": float(test["hit_rate"]),
+            "top_minus_bottom": _test_top_minus_bottom(quintiles),
+        }
+    )
+    return row
+
+
+def print_model_fit_report(
+    model_type: str,
+    *,
+    fold_metrics: pd.DataFrame,
+    quintiles: pd.DataFrame,
+    tuning: pd.DataFrame | None = None,
+    selected: float | int | None = None,
+    tuning_label: str = "ALPHA",
+    best_iteration: int | None = None,
+    max_iter: int | None = None,
+    importance: pd.DataFrame | None = None,
+) -> None:
+    """Print one model's tuning, early-stop, metrics, importance, and quintiles."""
+    print()
+    print("=" * 60)
+    print(model_type.upper())
+    print("=" * 60)
+
+    if tuning is not None and selected is not None:
+        print()
+        print("-" * 60)
+        print(tuning_label)
+        print("-" * 60)
+        if not tuning.empty:
+            with pd.option_context(
+                "display.max_columns",
+                None,
+                "display.width",
+                None,
+                "display.expand_frame_repr",
+                False,
+                "display.float_format",
+                lambda x: f"{x:.4f}",
+            ):
+                print(tuning.to_string(index=False))
+        print(f"SELECTED_{tuning_label}    {selected}")
+
+    if best_iteration is not None:
+        print()
+        print("-" * 60)
+        print("EARLY_STOP")
+        print("-" * 60)
+        print(f"BEST_ITERATION    {best_iteration}")
+        if max_iter is not None:
+            print(f"MAX_ITER          {max_iter}")
+
+    print()
+    print_metrics_table(fold_metrics)
+
+    if importance is not None:
+        print()
+        print_feature_importance(importance)
+
+    print_quintile_table(quintiles)
 
 
 def permutation_importance_regression(

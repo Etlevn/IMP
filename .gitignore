@@ -3,6 +3,7 @@
 _*/
 notes/
 *.ipynb
+!notebook/demo.ipynb
 output/
 data/*
 !data/.gitkeep

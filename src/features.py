@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from config.default import FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS
 from src.benchmark import BENCHMARK_COLUMN, attach_benchmark
 from src.prepare import _row_bar
 from src.sessions import align_trading_sessions
@@ -24,16 +26,8 @@ MARKET_TIME_COLUMN = "MarketTimeId"
 BEFORE_OPEN_ID = 1
 AFTER_CLOSE_ID = 2
 
-FEATURE_COLUMNS = [
-    "QScoreTrendLong",
-    "QScoreSpeedLong",
-    "QScoreLong",
-    "analystRatingsStrongBuy",
-    "analystRatingsBuy",
-    "analystRatingsHold",
-    "analystRatingsSell",
-    "analystRatingsStrongSell",
-]
+# Re-export config list for older ``from src.features import FEATURE_COLUMNS``.
+FEATURE_COLUMNS = list(CONFIG_FEATURE_COLUMNS)
 
 DROP_FROM_PANEL = [
     "symbol",
@@ -119,20 +113,53 @@ def _price_panel(df_all: pd.DataFrame) -> pd.DataFrame:
     return panel.drop_duplicates(subset=["TickerId", "Date"], keep="last")
 
 
-def build_event_table(
+def build_aligned_panel(
     df_all: pd.DataFrame,
     market_ticker: str = "SPY",
     data_dir: Path | None = None,
 ) -> pd.DataFrame:
-    """Build training event table ``df``: one row per announcement."""
+    """Session-align ``df_all`` and attach the market benchmark column."""
     earnings = _extract_earnings(df_all)
     panel = _price_panel(df_all)
-    aligned = align_trading_sessions(panel, earnings)
-    aligned = attach_benchmark(aligned, ticker=market_ticker, data_dir=data_dir)
+    df_align = align_trading_sessions(panel, earnings)
+    return attach_benchmark(df_align, ticker=market_ticker, data_dir=data_dir)
+
+
+def build_event_table(
+    df_all: pd.DataFrame,
+    market_ticker: str = "SPY",
+    data_dir: Path | None = None,
+    df_align: pd.DataFrame | None = None,
+    feature_columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Build training event table ``df``: one row per announcement.
+
+    Pass ``df_align`` from :func:`build_aligned_panel` to avoid repeating
+    session alignment and benchmark attach.
+
+    Feature values are taken from the DecisionDate row for each name in
+    ``feature_columns`` (default: ``config.default.FEATURE_COLUMNS``).
+
+    Raises ``KeyError`` if any requested feature is missing from ``df_align``.
+    """
+    if df_align is None:
+        df_align = build_aligned_panel(
+            df_all, market_ticker=market_ticker, data_dir=data_dir
+        )
+    feature_cols = list(
+        CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns
+    )
+    missing = [c for c in feature_cols if c not in df_align.columns]
+    if missing:
+        raise KeyError(
+            "Feature columns missing from aligned panel (df_align): "
+            f"{missing}. Attach the source columns before build_event_table, "
+            "or remove them from FEATURE_COLUMNS."
+        )
 
     rows: list[dict] = []
-    groups = list(aligned.groupby("TickerId", sort=False))
-    n_events = int(aligned[EVENT_COLUMN].notna().sum())
+    groups = list(df_align.groupby("TickerId", sort=False))
+    n_events = int(df_align[EVENT_COLUMN].notna().sum())
     with _row_bar(max(n_events, 1)) as bar:
         for ticker, frame in groups:
             frame = frame.sort_values("Date").reset_index(drop=True)
@@ -178,9 +205,9 @@ def build_event_table(
                     "Symbol": decision.get("Symbol", release.get("Symbol")),
                     "ShortName": decision.get("ShortName", release.get("ShortName")),
                     "EventDate": pd.Timestamp(release[EVENT_COLUMN]).normalize(),
-                    "release_session": pd.Timestamp(sessions[announcement]).normalize(),
-                    "anchor_session": pd.Timestamp(sessions[anchor]).normalize(),
-                    "decision_session": pd.Timestamp(sessions[decision_at]).normalize(),
+                    "ReleaseDate": pd.Timestamp(sessions[announcement]).normalize(),
+                    "AnchorDate": pd.Timestamp(sessions[anchor]).normalize(),
+                    "DecisionDate": pd.Timestamp(sessions[decision_at]).normalize(),
                     "MarketTimeId": release.get(MARKET_TIME_COLUMN),
                     "ret_ann": ret_ann,
                     "ret_ann_mkt": ret_ann_mkt,
@@ -194,8 +221,8 @@ def build_event_table(
                     "vol_ann": _window_vol(prices, anchor, ANN_START_OFFSET, ANN_END_OFFSET),
                     "vol_post": _window_vol(prices, anchor, POST_START_OFFSET, POST_END_OFFSET),
                 }
-                for column in FEATURE_COLUMNS:
-                    row[column] = decision[column] if column in frame.columns else np.nan
+                for column in feature_cols:
+                    row[column] = decision[column]
                 if "Id" in frame.columns and pd.notna(release.get("Id")):
                     row["Id"] = release["Id"]
                 rows.append(row)
@@ -205,9 +232,9 @@ def build_event_table(
     if len(df):
         for column in (
             "EventDate",
-            "release_session",
-            "anchor_session",
-            "decision_session",
+            "ReleaseDate",
+            "AnchorDate",
+            "DecisionDate",
         ):
             df[column] = pd.to_datetime(df[column]).dt.normalize()
         df = df.sort_values(["TickerId", "EventDate"]).reset_index(drop=True)

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 
+from config.default import DATA_DIR
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel
 
 pd.set_option("display.max_columns", None)
@@ -17,17 +18,17 @@ pd.set_option("display.max_colwidth", None)
 
 
 def main() -> None:
-    stock_data = load_stock()
+    stock_data = load_stock(DATA_DIR)
     print("stock_data")
     print(stock_data.head())
     print()
 
-    earnings = load_earnings()
+    earnings = load_earnings(DATA_DIR)
     print("earnings")
     print(earnings.head())
     print()
 
-    historical_sentiment_scores = load_sentiment()
+    historical_sentiment_scores = load_sentiment(DATA_DIR)
     print("historical_sentiment_scores")
     print(historical_sentiment_scores.head())
     print()

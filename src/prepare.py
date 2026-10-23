@@ -9,15 +9,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
+from config.default import (
+    DATA_DIR,
+    EARNINGS_FILE,
+    SENTIMENT_FILE,
+    SENTIMENT_TOLERANCE_DAYS,
+    STOCK_FILE,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = ROOT / "data"
-
-STOCK_FILE = "stock-data_us.parquet"
-EARNINGS_FILE = "earnings_us.parquet"
-SENTIMENT_FILE = "historical_sentiment_scores_us.parquet"
-
-# Monthly rating snapshots: carry the latest on/before each price date.
-SENTIMENT_TOLERANCE_DAYS = 31
 
 _CHUNK = 50_000
 
