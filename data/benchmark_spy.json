@@ -1,0 +1,10 @@
+{
+  "source": "yahoo",
+  "ticker": "SPY",
+  "field": "Adj Close",
+  "fetched_at_utc": "2026-10-23T02:44:10+00:00",
+  "start": "2020-01-02",
+  "end": "2024-12-31",
+  "rows": 1258,
+  "sha256": "7b699207a1f84eb376b67f0cf8fae22d5c6210a0f3f193d8fb0079b2822779e4"
+}
