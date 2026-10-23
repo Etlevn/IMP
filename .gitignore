@@ -7,9 +7,6 @@ notes/
 output/
 data/*
 !data/.gitkeep
-!data/dataset.md
-!data/fields.md
-!data/inconsistencies.md
 !data/swagger.yaml
 !data/benchmark_spy.json
 __pycache__/

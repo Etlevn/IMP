@@ -34,6 +34,7 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 - [`docs/dataset.md`](docs/dataset.md) — source tables
 - [`docs/fields.md`](docs/fields.md) — event-table dates, labels, decision-day features
 - [`docs/metrics.md`](docs/metrics.md) — evaluation scores and baselines
+- [`docs/data_qa.md`](docs/data_qa.md) — doc vs data QA notes and resolutions
 
 | File                                     | Role                                      |
 | ---------------------------------------- | ----------------------------------------- |
@@ -42,7 +43,7 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 | `historical_sentiment_scores_us.parquet` | Monthly analyst rating counts             |
 | `benchmark_spy.parquet` / `.json`        | Optional SPY cache (created on first run) |
 
-Sample panel used in development: on the order of **~200 U.S. names, 2020–2024**. Stock returns use `LastPrice` (adjustment convention not stated in-file).
+Sample panel used in development: on the order of **~200 U.S. names** with price dates **2020–2024** (ticker/symbol counts are not exact equals; see `docs/dataset.md`). Stock returns use `LastPrice` (adjustment convention not stated in-file).
 
 ## Quick start
 
@@ -122,7 +123,7 @@ config/
 model/           estimators
 src/             prepare, sessions, benchmark, features, preprocess, metrics, report, pipeline, train
 script/          run_data / run_feature / run_preprocess
-docs/            dataset.md, fields.md, metrics.md
+docs/            dataset.md, fields.md, metrics.md, data_qa.md
 notebook/        demo.ipynb
 main.py
 data/            local Parquet (+ SPY cache); not redistributed
