@@ -19,7 +19,7 @@ from src.train import FamilyName
 FAMILIES: tuple[FamilyName, ...] = (
     "lin",
     # "tr",
-    # "nn",
+    #"nn",
 )
 # ========================================================================================
 

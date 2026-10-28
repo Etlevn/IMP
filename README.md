@@ -41,9 +41,25 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 | `stock-data_us.parquet`                  | Daily prices and QScore features          |
 | `earnings_us.parquet`                    | Event dates and `MarketTimeId`            |
 | `historical_sentiment_scores_us.parquet` | Monthly analyst rating counts             |
-| `benchmark_spy.parquet` / `.json`        | Optional SPY cache (created on first run) |
+| `stock_universe.csv`                     | One row per `TickerId` for WRDS / external data mapping (see below) |
+| `benchmark_spy.parquet` / `.json`        | Optional Yahoo SPY cache (when `BENCHMARK_SOURCE=yahoo`) |
+| `benchmark_equal|cap.parquet` / `.json`  | Optional universe-index cache (when `BENCHMARK_SOURCE=equal|cap`) |
+| `macro_daily.parquet` / `.json`          | Optional Yahoo macro cache (`MACRO_SERIES`: vix / tnx / dxy) |
 
 Sample panel used in development: on the order of **~200 U.S. names** with price dates **2020–2024** (ticker/symbol counts are not exact equals; see `docs/dataset.md`). Stock returns use `LastPrice` (adjustment convention not stated in-file).
+
+### Stock universe CSV
+
+[`data/stock_universe.csv`](data/stock_universe.csv) is a minimal download list (one row per `TickerId`) for WRDS / other external pulls: identifiers plus price-panel date coverage. Regenerate with `python script/export_universe.py`.
+
+| Column | Notes |
+| ------ | ----- |
+| `TickerId` | Join key back to IMP |
+| `Symbol`, `Exchange` | Split from `ShortName` (e.g. `ABNB` / `XNGS`) |
+| `InstrumentName` | Company name for manual checks |
+| `price_start`, `price_end` | Suggested download window |
+
+Same `Symbol` may appear on more than one row (see `docs/data_qa.md`); keep those rows when mapping vendor ids.
 
 ## Quick start
 
@@ -51,6 +67,7 @@ Sample panel used in development: on the order of **~200 U.S. names** with price
 python script/run_data.py          # preview df_all
 python script/run_feature.py       # build df + descriptive report
 python script/run_preprocess.py    # split + train-only impute / scale
+python script/export_universe.py   # write data/stock_universe.csv
 
 python main.py                     # edit FAMILIES = ("lin",) or ("lin", "tr", "nn")
 ```
@@ -63,7 +80,7 @@ Notebook walkthrough: `notebook/demo.ipynb` (set `FAMILIES` in CONFIG, then run 
 data/*.parquet
     -> prepare      load + merge              -> df_all
     -> sessions     trading calendar
-    -> benchmark    SPY Adj Close
+    -> benchmark    market Adj Close (yahoo / equal / cap)
     -> features     event rows                -> df
     -> preprocess   train / val / test + train-only impute / scale
     -> main.py      fit, metrics, output/
@@ -79,7 +96,7 @@ Design summary (details in `docs/`):
 - Earnings: exact left join on `Date`/`TickerId` ↔ `EventDate`/`TickerId`
 - Analyst ratings: backward `merge_asof` by symbol, 31-day tolerance
 - Anchor from `MarketTimeId` (1 = BMO same day, 2 = AMC next session)
-- Decision features snapped at `DecisionDate`; default target `ret_ann_mkt` (announcement [-1, +1] vs SPY)
+- Decision features snapped at `DecisionDate`; default target `ret_ann_mkt` (announcement [-1, +1] vs configured benchmark)
 
 ## Preprocessing
 
@@ -112,7 +129,8 @@ Select families in `main.py` (`FAMILIES`). Classification (`dir_ann`) is reserve
 Definitions: [`docs/metrics.md`](docs/metrics.md) (OOS R², baselines, IC, quintiles, permutation importance).
 
 Terminal blocks: **METRICS**, optional **FEATURE**, **QUINTILES**, then **SUMMARY** (test only; includes `top_minus_bottom`).  
-Artifacts under `output/{lin,tr,nn}/` (gitignored): `metrics.csv`, `predictions.parquet`, `run_config.json`.
+Artifacts under `output/` (gitignored): `metrics.csv`, `predictions.parquet`, `run_config.json`
+(all families merged; rows tagged with a `family` column).
 
 ## Layout
 
@@ -121,12 +139,12 @@ config/
   default.py       global data / benchmark / split defaults
   config_*.py      family-specific model knobs
 model/           estimators
-src/             prepare, sessions, benchmark, features, preprocess, metrics, report, pipeline, train
-script/          run_data / run_feature / run_preprocess
+src/             prepare, sessions, benchmark, macro, analyst, engineered, features, preprocess, metrics, report, pipeline, train
+script/          run_data / run_feature / run_preprocess / export_universe
 docs/            dataset.md, fields.md, metrics.md, data_qa.md
 notebook/        demo.ipynb
 main.py
-data/            local Parquet (+ SPY cache); not redistributed
+data/            local Parquet (+ benchmark caches); stock_universe.csv tracked
 output/          run artifacts (gitignored)
 ```
 

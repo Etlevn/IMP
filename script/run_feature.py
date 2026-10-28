@@ -27,6 +27,14 @@ def main() -> None:
         benchmark_source=BENCHMARK_SOURCE,
     )
     print_benchmark_preview(df_align)
+    # Panel: coverage / head / describe (features visible here).
+    print_event_report(
+        df_align,
+        feature_columns=features,
+        label="df_align",
+        correlations=False,
+        targets=False,
+    )
 
     df = build_event_table(
         df_all,
@@ -36,7 +44,14 @@ def main() -> None:
         feature_columns=features,
         benchmark_source=BENCHMARK_SOURCE,
     )
-    print_event_report(df, feature_columns=features)
+    # Event table: correlations + target summary only.
+    print_event_report(
+        df,
+        feature_columns=features,
+        coverage=False,
+        head=False,
+        describe=False,
+    )
 
 
 if __name__ == "__main__":

@@ -13,16 +13,13 @@ from config.default import (
     FEATURE_IMPORTANCE_REPEATS,
     IMPUTE_STRATEGY,
     MARKET_TICKER,
-    PROJECT_ROOT,
+    OUTPUT_DIR,
     RANDOM_STATE,
     SPLIT_COLUMN,
     TARGET,
     TRAIN_END,
     VAL_END,
 )
-
-# Run outputs for this family.
-OUTPUT_DIR = PROJECT_ROOT / "output" / "nn"
 
 # Batch label for run_config / logs. Any non-empty string.
 MODEL_LABEL = "nn_batch"

@@ -180,9 +180,14 @@ def run_one_model(
     return summary, predictions
 
 
-def run_family(spec: FamilySpec) -> None:
-    """Full batch run for one model family (config → data → fit → artifacts)."""
+def run_family(spec: FamilySpec) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Full batch run for one model family (config → data → fit).
+
+    Returns ``(metrics, predictions, run_config)`` with a leading ``family``
+    column on the frames. Does not write artifacts; callers merge and save.
+    """
     cfg = spec.config
+    family = str(spec.name)
     print_family_config(spec)
 
     task = infer_task(cfg.TARGET)
@@ -239,11 +244,14 @@ def run_family(spec: FamilySpec) -> None:
         prediction_blocks.append(predictions)
 
     metrics = pd.DataFrame(summary_rows)
+    metrics.insert(0, "family", family)
     predictions_all = pd.concat(prediction_blocks, axis=0).reset_index(drop=True)
+    predictions_all.insert(0, "family", family)
     print_banner("SUMMARY")
     print_summary_table(metrics)
 
     run_config = {
+        "family": family,
         "MODEL_LABEL": cfg.MODEL_LABEL,
         spec.model_types_key: list(model_types),
         **spec.run_config_extra,
@@ -263,19 +271,15 @@ def run_family(spec: FamilySpec) -> None:
         "n_dropped_target": result.n_dropped_target,
         "folds": fold_date_range(result, cfg.SPLIT_COLUMN),
     }
-    save_run_artifacts(
-        output_dir=Path(cfg.OUTPUT_DIR),
-        metrics=metrics,
-        predictions=predictions_all,
-        run_config=run_config,
-    )
+    return metrics, predictions_all, run_config
 
 
 def run_family_by_name(family: FamilyName | Sequence[FamilyName]) -> None:
-    """Run one or more families sequentially (``main.py`` / ``main_*.py``).
+    """Run one or more families sequentially (``main.py``).
 
-    Each family keeps its own preprocess (``STANDARDIZE``), SUMMARY, and
-    ``output/{lin,tr,nn}/`` artifacts.
+    Each family keeps its own preprocess (``STANDARDIZE``) and SUMMARY print.
+    Artifacts are merged and written once under ``output/``:
+    ``metrics.csv``, ``predictions.parquet``, ``run_config.json``.
     """
     if isinstance(family, str):
         families: tuple[FamilyName, ...] = (family,)
@@ -290,5 +294,30 @@ def run_family_by_name(family: FamilyName | Sequence[FamilyName]) -> None:
             f"Unknown family name(s) {unknown!r}; expected lin / tr / nn."
         )
 
+    metrics_blocks: list[pd.DataFrame] = []
+    prediction_blocks: list[pd.DataFrame] = []
+    family_configs: dict[str, dict] = {}
+    output_dir: Path | None = None
+
     for name in families:
-        run_family(get_family_spec(name))
+        spec = get_family_spec(name)
+        if output_dir is None:
+            output_dir = Path(spec.config.OUTPUT_DIR)
+        metrics, predictions, run_config = run_family(spec)
+        metrics_blocks.append(metrics)
+        prediction_blocks.append(predictions)
+        family_configs[str(name)] = run_config
+
+    assert output_dir is not None
+    metrics_all = pd.concat(metrics_blocks, axis=0, ignore_index=True)
+    predictions_all = pd.concat(prediction_blocks, axis=0, ignore_index=True)
+    run_config_all = {
+        "families": list(families),
+        "by_family": family_configs,
+    }
+    save_run_artifacts(
+        output_dir=output_dir,
+        metrics=metrics_all,
+        predictions=predictions_all,
+        run_config=run_config_all,
+    )

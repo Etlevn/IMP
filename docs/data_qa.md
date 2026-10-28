@@ -2,7 +2,6 @@
 
 Findings from comparing [`dataset.md`](dataset.md) / [`fields.md`](fields.md) to a run of
 `script/run_data.py`, `script/run_feature.py`, and `script/run_preprocess.py`.
-Observed types and counts: [`data/swagger.yaml`](../data/swagger.yaml).
 
 Each item keeps the original observation, then a short **Response** (doc fix and/or open follow-up).
 This file replaced `data/inconsistencies.md` (same audit, clearer name, lives with other docs).

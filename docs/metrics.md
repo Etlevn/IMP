@@ -102,12 +102,12 @@ Per model run (typical order):
 4. **QUINTILES** — val / test
 5. **SUMMARY** — one test-fold row per model (fit metrics + `top_minus_bottom`)
 
-Written under `output/{lin,tr,nn}/` (gitignored):
+Written under `output/` (gitignored); multi-family runs merge into one file each:
 
 | File                  | Contents                                                                 |
 | --------------------- | ------------------------------------------------------------------------ |
-| `metrics.csv`         | SUMMARY rows (numeric), including test `top_minus_bottom` when available |
-| `predictions.parquet` | Per-event `y_true`, `y_pred`, `residual`, `fold`, `model`, dates         |
-| `run_config.json`     | Resolved settings and fold date ranges                                   |
+| `metrics.csv`         | SUMMARY rows with `family`, including test `top_minus_bottom` when available |
+| `predictions.parquet` | Per-event `family`, `y_true`, `y_pred`, `residual`, `fold`, `model`, dates |
+| `run_config.json`     | `{families, by_family}` with per-family settings and fold date ranges    |
 
 Implementation: `src/metrics.py`.

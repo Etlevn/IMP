@@ -24,6 +24,7 @@ TARGET_COLUMNS = [
 ]
 PRIMARY_TARGET = "ret_ann_mkt"
 DATE_COLUMNS = (
+    "Date",
     "EventDate",
     "ReleaseDate",
     "AnchorDate",
@@ -66,12 +67,18 @@ def _for_print(df: pd.DataFrame) -> pd.DataFrame:
 
 def _coverage(df: pd.DataFrame) -> None:
     print(f"rows={len(df)}  cols={df.shape[1]}  tickers={df['TickerId'].nunique()}")
-    print(f"EventDate        {_day(df['EventDate'].min())} .. {_day(df['EventDate'].max())}")
-    print(
-        f"DecisionDate     {_day(df['DecisionDate'].min())} .. "
-        f"{_day(df['DecisionDate'].max())}"
-    )
-    if "MarketTimeId" in df.columns:
+    if "EventDate" in df.columns and df["EventDate"].notna().any():
+        events = df["EventDate"].dropna()
+        print(f"EventDate        {_day(events.min())} .. {_day(events.max())}")
+    if "DecisionDate" in df.columns and df["DecisionDate"].notna().any():
+        print(
+            f"DecisionDate     {_day(df['DecisionDate'].min())} .. "
+            f"{_day(df['DecisionDate'].max())}"
+        )
+    if "Date" in df.columns:
+        dates = pd.to_datetime(df["Date"])
+        print(f"Date             {_day(dates.min())} .. {_day(dates.max())}")
+    if "MarketTimeId" in df.columns and df["MarketTimeId"].notna().any():
         counts = (
             pd.to_numeric(df["MarketTimeId"], errors="coerce")
             .astype("Int64")
@@ -212,30 +219,47 @@ def print_event_report(
     df: pd.DataFrame,
     primary_target: str = PRIMARY_TARGET,
     feature_columns: Sequence[str] | None = None,
+    *,
+    label: str = "df",
+    coverage: bool = True,
+    head: bool = True,
+    describe: bool = True,
+    correlations: bool = True,
+    targets: bool = True,
 ) -> None:
-    """Print coverage, head, compact describe, correlations, and target summary."""
+    """Print selected descriptive sections.
+
+    ``label`` is only the printed section prefix (default ``df``).
+    Toggle individual blocks with the boolean flags.
+    """
     _configure_display()
     view = _for_print(df)
 
-    _section("df coverage")
-    _coverage(df)
+    if coverage:
+        _section(f"{label} coverage")
+        _coverage(df)
 
-    _section("df head")
-    print(view.head())
+    if head:
+        _section(f"{label} head")
+        print(view.head())
 
-    _section("df describe")
-    feature_cols = [c for c in df.columns if c not in TARGET_COLUMNS]
-    print(_column_summary(df[feature_cols]))
+    if describe:
+        _section(f"{label} describe")
+        feature_cols = [c for c in df.columns if c not in TARGET_COLUMNS]
+        print(_column_summary(df[feature_cols]))
 
-    _section(f"df correlations ({primary_target})")
-    _corr_with_target(df, primary_target, feature_columns=feature_columns)
+    if correlations and primary_target in df.columns:
+        _section(f"{label} correlations ({primary_target})")
+        _corr_with_target(df, primary_target, feature_columns=feature_columns)
 
-    _section("df target summary")
-    present = sorted(
-        [c for c in TARGET_COLUMNS if c in df.columns],
-        key=str.lower,
-    )
-    print(_column_summary(df[present]))
+    if targets:
+        present = sorted(
+            [c for c in TARGET_COLUMNS if c in df.columns],
+            key=str.lower,
+        )
+        if present:
+            _section(f"{label} target summary")
+            print(_column_summary(df[present]))
 
 
 def print_preprocess_report(
