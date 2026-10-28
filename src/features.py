@@ -8,7 +8,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from config.default import FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS
+from config.default import (
+    BENCHMARK_SOURCE as CONFIG_BENCHMARK_SOURCE,
+    FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS,
+    MARKET_TICKER as CONFIG_MARKET_TICKER,
+)
 from src.benchmark import BENCHMARK_COLUMN, attach_benchmark
 from src.prepare import _row_bar
 from src.sessions import align_trading_sessions
@@ -115,22 +119,31 @@ def _price_panel(df_all: pd.DataFrame) -> pd.DataFrame:
 
 def build_aligned_panel(
     df_all: pd.DataFrame,
-    market_ticker: str = "SPY",
+    market_ticker: str | None = None,
     data_dir: Path | None = None,
+    benchmark_source: str | None = None,
 ) -> pd.DataFrame:
     """Session-align ``df_all`` and attach the market benchmark column."""
+    ticker = CONFIG_MARKET_TICKER if market_ticker is None else market_ticker
+    source = CONFIG_BENCHMARK_SOURCE if benchmark_source is None else benchmark_source
     earnings = _extract_earnings(df_all)
     panel = _price_panel(df_all)
     df_align = align_trading_sessions(panel, earnings)
-    return attach_benchmark(df_align, ticker=market_ticker, data_dir=data_dir)
+    return attach_benchmark(
+        df_align,
+        ticker=ticker,
+        data_dir=data_dir,
+        source=source,
+    )
 
 
 def build_event_table(
     df_all: pd.DataFrame,
-    market_ticker: str = "SPY",
+    market_ticker: str | None = None,
     data_dir: Path | None = None,
     df_align: pd.DataFrame | None = None,
     feature_columns: Sequence[str] | None = None,
+    benchmark_source: str | None = None,
 ) -> pd.DataFrame:
     """Build training event table ``df``: one row per announcement.
 
@@ -144,7 +157,10 @@ def build_event_table(
     """
     if df_align is None:
         df_align = build_aligned_panel(
-            df_all, market_ticker=market_ticker, data_dir=data_dir
+            df_all,
+            market_ticker=market_ticker,
+            data_dir=data_dir,
+            benchmark_source=benchmark_source,
         )
     feature_cols = list(
         CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns

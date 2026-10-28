@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config.default import (
+    BENCHMARK_SOURCE,
     DATA_DIR,
     FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS,
     IMPUTE_STRATEGY,
@@ -58,6 +59,7 @@ def main() -> None:
         market_ticker=MARKET_TICKER,
         data_dir=DATA_DIR,
         feature_columns=features,
+        benchmark_source=BENCHMARK_SOURCE,
     )
 
     result = run_preprocess(

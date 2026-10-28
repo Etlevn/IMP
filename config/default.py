@@ -21,10 +21,14 @@ SENTIMENT_FILE = "historical_sentiment_scores_us.parquet"
 SENTIMENT_TOLERANCE_DAYS = 31
 
 # --- benchmark (market-adjusted returns) ---
-# Yahoo ticker via yfinance; common: SPY (default), QQQ, IWM, DIA, VTI.
+# Source: "yahoo" | "equal" | "cap"
+# - yahoo: external ETF via yfinance (uses MARKET_TICKER)
+# - equal: equal-weighted index from the ~200-name panel (LastPrice)
+# - cap: same-day MarketCap-weighted index from the panel
+BENCHMARK_SOURCE = "equal"
+# Yahoo ticker when BENCHMARK_SOURCE == "yahoo"; ignored for equal / cap.
+# Common: SPY (default), QQQ, IWM, DIA, VTI.
 MARKET_TICKER = "SPY"
-# Currently only "yahoo" is implemented in src/benchmark.py.
-BENCHMARK_SOURCE = "yahoo"
 
 # --- experiment ---
 # Allowed: ret_ann | ret_ann_mkt | ret_next | ret_next_mkt |

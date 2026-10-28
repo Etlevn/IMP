@@ -6,6 +6,7 @@ Shared paths / data / split / target defaults: ``config/default.py``.
 from __future__ import annotations
 
 from config.default import (
+    BENCHMARK_SOURCE,
     DATA_ROOT,
     FEATURE_COLUMNS,
     FEATURE_IMPORTANCE,

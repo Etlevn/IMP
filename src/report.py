@@ -146,6 +146,8 @@ def print_notebook_config(
     feature_importance_repeats: int,
     standardize: bool | None = None,
     active_families: Sequence[tuple[str, Mapping[str, Any]]] | None = None,
+    benchmark_source: str | None = None,
+    market_ticker: str | None = None,
 ) -> None:
     """Print notebook-local CONFIG (shared knobs + optional per-family blocks).
 
@@ -156,6 +158,10 @@ def print_notebook_config(
     if active_families is not None:
         print(f"ACTIVE_FAMILIES  {[name for name, _ in active_families]}")
     print(f"TARGET            {target}")
+    if benchmark_source is not None:
+        print(f"BENCHMARK_SOURCE  {benchmark_source}")
+    if market_ticker is not None:
+        print(f"MARKET_TICKER     {market_ticker}")
     print(f"FEATURE_COLUMNS   ({len(feature_columns)})")
     for name in feature_columns:
         print(f"                  - {name}")

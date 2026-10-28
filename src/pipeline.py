@@ -109,6 +109,7 @@ def print_family_config(spec: FamilySpec) -> None:
     for key, value in spec.config_extra_lines:
         print(f"{key:<18}{value}")
     print(f"TARGET            {spec.config.TARGET}")
+    print(f"BENCHMARK_SOURCE  {spec.config.BENCHMARK_SOURCE}")
     print(f"MARKET_TICKER     {spec.config.MARKET_TICKER}")
     print(f"DATA_ROOT         {spec.config.DATA_ROOT}")
     print(f"FEATURE_COLUMNS   ({len(spec.config.FEATURE_COLUMNS)})")
@@ -204,6 +205,7 @@ def run_family(spec: FamilySpec) -> None:
         market_ticker=cfg.MARKET_TICKER,
         data_dir=cfg.DATA_ROOT,
         feature_columns=cfg.FEATURE_COLUMNS,
+        benchmark_source=cfg.BENCHMARK_SOURCE,
     )
 
     result = run_preprocess(
@@ -246,6 +248,7 @@ def run_family(spec: FamilySpec) -> None:
         spec.model_types_key: list(model_types),
         **spec.run_config_extra,
         "TARGET": cfg.TARGET,
+        "BENCHMARK_SOURCE": cfg.BENCHMARK_SOURCE,
         "MARKET_TICKER": cfg.MARKET_TICKER,
         "DATA_ROOT": str(cfg.DATA_ROOT),
         "FEATURE_COLUMNS": list(cfg.FEATURE_COLUMNS),
