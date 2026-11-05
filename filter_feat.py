@@ -67,6 +67,7 @@ FEATURES: tuple[str, ...] = (
     "tnx",
     "dxy",
     "par_mkt",
+    "par*vix",
 )
 
 # Missing rate above this is labeled drop. Allowed: float in [0, 1].

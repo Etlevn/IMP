@@ -5,7 +5,7 @@ panel. Everything else is created here and switched on from ``config.default``:
 
 - ``analyst``: Coverage, BuyRatio, SellRatio, RatingScore
 - ``macro``: Yahoo daily levels such as vix, tnx, dxy
-- ``engineered``: mom_21d, vol_21d, log_mcap, par_mkt
+- ``engineered``: mom_21d, vol_21d, log_mcap, par_mkt, par*vix
 
 The event table that consumes these columns lives in ``src.events``.
 """

@@ -51,14 +51,16 @@ MACRO_FEATURES = {
     "dxy": "DX-Y.NYB",
 }
 
-# Allowed: mom_21d | vol_21d | log_mcap | par_mkt.
+# Allowed: mom_21d | vol_21d | log_mcap | par_mkt | par*vix.
 # par_mkt is the reversal-comparison window: close at anchor−5 through close at
 # anchor−2, stock minus benchmark, stored on the decision-day row.
+# par*vix is that decision-day par_mkt multiplied by the raw vix on the same row.
 ENGINEERED_FEATURES = [
     "mom_21d",
     "vol_21d",
     "log_mcap",
     "par_mkt",
+    "par*vix",
 ]
 
 # --- experiment ---

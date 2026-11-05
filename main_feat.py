@@ -88,6 +88,17 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
         "log_mcap",
         "par_mkt",
     ),
+    "base+eng+par+par*vix": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "Coverage",
+        "RatingScore",
+        "mom_21d",
+        "vol_21d",
+        "log_mcap",
+        "par_mkt",
+        "par*vix",
+    ),
 }
 
 # ========================================================================================
