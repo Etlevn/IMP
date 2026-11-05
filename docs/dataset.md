@@ -87,5 +87,5 @@ stock-data_us
         build_event_table → df   (one row per joined announcement)
 ```
 
-Observed schema / counts: [`data/swagger.yaml`](../data/swagger.yaml).  
+Observed schema / counts: [`docs/swagger.yaml`](swagger.yaml).  
 QA notes vs docs: [`data_qa.md`](data_qa.md).

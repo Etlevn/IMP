@@ -5,9 +5,6 @@ notes/
 *.ipynb
 !notebook/demo.ipynb
 output/
-data/*
-!data/.gitkeep
-!data/swagger.yaml
-!data/benchmark_spy.json
+data/
 __pycache__/
 *.py[cod]
