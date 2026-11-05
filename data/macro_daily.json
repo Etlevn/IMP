@@ -6,9 +6,9 @@
     "dxy": "DX-Y.NYB"
   },
   "field": "Close",
-  "fetched_at_utc": "2026-10-28T04:57:25+00:00",
-  "start": "2020-01-02",
-  "end": "2024-12-31",
-  "rows": 1258,
-  "sha256": "4e3493729af51e0be40a31fc20c42496191950857e0232011ccfe8cabf36eb4a"
+  "fetched_at_utc": "2026-11-05T05:38:59+00:00",
+  "start": "2019-01-02",
+  "end": "2025-12-31",
+  "rows": 1762,
+  "sha256": "ef01ac8ae7c2eb6892ad00525603e02e9af58364a754313fad84a5b0eb628aad"
 }

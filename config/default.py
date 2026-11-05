@@ -16,8 +16,10 @@ DATA_ROOT = DATA_DIR  # alias used by model configs
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
 # --- source parquet filenames under DATA_DIR ---
-STOCK_FILE = "stock-data_us.parquet"
-EARNINGS_FILE = "earnings_us.parquet"
+# Expanded panel: 2019-01-02 through 2025-12-31, about 800 names.
+# Sentiment stays on the original ~200-symbol monthly file.
+STOCK_FILE = "stock_data_us_expanded-2019-2026.parquet"  # "stock-data_us.parquet"
+EARNINGS_FILE = "earnings_us_expanded-2019-2026.parquet"  # "earnings_us.parquet"
 SENTIMENT_FILE = "historical_sentiment_scores_us.parquet"
 # Backward asof window for monthly analyst snapshots (calendar days).
 SENTIMENT_TOLERANCE_DAYS = 31
@@ -79,17 +81,18 @@ FEATURE_COLUMNS = [
     # "analystRatingsHold",
     # "analystRatingsSell",
     # "analystRatingsStrongSell",
-    "Coverage",
+    # "Coverage",
     # "BuyRatio",
     # "SellRatio",
-    "RatingScore",
+    # "RatingScore",
     # "vix",
     # "tnx",
     # "dxy",
     "mom_21d",
     "vol_21d",
     "log_mcap",
-    "par_mkt",
+    # "par_mkt",
+    # "par*vix",
 ]
 
 # Allowed: EventDate | DecisionDate | AnchorDate | ReleaseDate
@@ -97,8 +100,8 @@ SPLIT_COLUMN = "DecisionDate"
 
 # Inclusive calendar cuts (YYYY-MM-DD).
 # train: <= TRAIN_END; val: TRAIN_END < d <= VAL_END; test: > VAL_END
-TRAIN_END = "2022-12-31"
-VAL_END = "2023-12-31"
+TRAIN_END = "2022-12-31"  
+VAL_END = "2023-12-31"  
 
 # Feature missing values (fit on train only): median | mean | drop
 IMPUTE_STRATEGY = "median"

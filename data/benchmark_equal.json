@@ -1,11 +1,11 @@
 {
   "source": "equal",
   "field": "AdjClose",
-  "fetched_at_utc": "2026-11-05T05:18:45+00:00",
-  "start": "2020-01-03",
-  "end": "2024-12-31",
-  "rows": 1281,
-  "sha256": "31c70537c9d3ddf5ee6b62a9d6d95d0e2d0f015d0484ea8f853582dfd7fc9880",
+  "fetched_at_utc": "2026-11-05T06:02:46+00:00",
+  "start": "2019-01-03",
+  "end": "2025-12-31",
+  "rows": 1759,
+  "sha256": "249eac226b15078bd12f199f95737eb4d86d504d6a1bc969301717db6a73adca",
   "method": "equal",
   "price_field": "LastPrice"
 }

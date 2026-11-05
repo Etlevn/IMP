@@ -101,7 +101,8 @@ def _event_anchors(frame: pd.DataFrame) -> list[tuple[int, int | None]]:
             nxt = announcement + 1
             anchors.append((announcement, nxt if nxt <= last else None))
         else:
-            raise ValueError(f"MarketTimeId must be 1 or 2, got {code}.")
+            # Unknown codes are not placed on the grid; skip if one still arrives.
+            anchors.append((announcement, None))
     return anchors
 
 
