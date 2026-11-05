@@ -50,7 +50,7 @@ Sample panel used in development: on the order of **~200 U.S. names** with price
 
 ### Stock universe CSV
 
-[`data/stock_universe.csv`](data/stock_universe.csv) is a minimal download list (one row per `TickerId`) for WRDS / other external pulls: identifiers plus price-panel date coverage. Regenerate with `python script/export_universe.py`.
+`data/stock_universe.csv` is a local download list (one row per `TickerId`) for WRDS / other external pulls: identifiers plus price-panel date coverage. Regenerate with `python script/export_universe.py`.
 
 | Column | Notes |
 | ------ | ----- |
