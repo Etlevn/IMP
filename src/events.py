@@ -9,17 +9,17 @@ import numpy as np
 import pandas as pd
 
 from config.default import (
-    ANALYST_DERIVED_FEATURES as CONFIG_ANALYST_DERIVED_FEATURES,
+    ANALYST_FEATURES as CONFIG_ANALYST_FEATURES,
     BENCHMARK_SOURCE as CONFIG_BENCHMARK_SOURCE,
     ENGINEERED_FEATURES as CONFIG_ENGINEERED_FEATURES,
     FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS,
-    MACRO_SERIES as CONFIG_MACRO_SERIES,
+    MACRO_FEATURES as CONFIG_MACRO_FEATURES,
     MARKET_TICKER as CONFIG_MARKET_TICKER,
 )
-from src.analyst import attach_analyst_features
 from src.benchmark import BENCHMARK_COLUMN, attach_benchmark
-from src.engineered import attach_engineered_features
-from src.macro import attach_macro
+from src.features.analyst import attach_analyst_features
+from src.features.engineered import attach_engineered_features
+from src.features.macro import attach_macro
 from src.prepare import _row_bar
 from src.sessions import align_trading_sessions
 
@@ -35,9 +35,6 @@ EVENT_COLUMN = "EventDate"
 MARKET_TIME_COLUMN = "MarketTimeId"
 BEFORE_OPEN_ID = 1
 AFTER_CLOSE_ID = 2
-
-# Re-export config list for older ``from src.features import FEATURE_COLUMNS``.
-FEATURE_COLUMNS = list(CONFIG_FEATURE_COLUMNS)
 
 DROP_FROM_PANEL = [
     "symbol",
@@ -128,19 +125,15 @@ def build_aligned_panel(
     market_ticker: str | None = None,
     data_dir: Path | None = None,
     benchmark_source: str | None = None,
-    macro_series: dict[str, str] | None = None,
-    analyst_derived_features: list[str] | None = None,
+    macro_features: dict[str, str] | None = None,
+    analyst_features: list[str] | None = None,
     engineered_features: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Session-align ``df_all``; attach benchmark, macros, analyst, engineered cols."""
+    """Session-align ``df_all`` and attach each enabled feature group."""
     ticker = CONFIG_MARKET_TICKER if market_ticker is None else market_ticker
     source = CONFIG_BENCHMARK_SOURCE if benchmark_source is None else benchmark_source
-    macros = CONFIG_MACRO_SERIES if macro_series is None else macro_series
-    derived = (
-        CONFIG_ANALYST_DERIVED_FEATURES
-        if analyst_derived_features is None
-        else analyst_derived_features
-    )
+    macros = CONFIG_MACRO_FEATURES if macro_features is None else macro_features
+    analyst = CONFIG_ANALYST_FEATURES if analyst_features is None else analyst_features
     engineered = (
         CONFIG_ENGINEERED_FEATURES
         if engineered_features is None
@@ -155,8 +148,8 @@ def build_aligned_panel(
         data_dir=data_dir,
         source=source,
     )
-    df_align = attach_macro(df_align, data_dir=data_dir, series=macros)
-    df_align = attach_analyst_features(df_align, derived_features=derived)
+    df_align = attach_macro(df_align, data_dir=data_dir, macro_features=macros)
+    df_align = attach_analyst_features(df_align, analyst_features=analyst)
     return attach_engineered_features(df_align, engineered_features=engineered)
 
 
@@ -167,12 +160,14 @@ def build_event_table(
     df_align: pd.DataFrame | None = None,
     feature_columns: Sequence[str] | None = None,
     benchmark_source: str | None = None,
-    macro_series: dict[str, str] | None = None,
+    macro_features: dict[str, str] | None = None,
+    analyst_features: list[str] | None = None,
+    engineered_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build training event table ``df``: one row per announcement.
 
     Pass ``df_align`` from :func:`build_aligned_panel` to avoid repeating
-    session alignment, benchmark attach, and macro merge.
+    session alignment and feature-group attach.
 
     Feature values are taken from the DecisionDate row for each name in
     ``feature_columns`` (default: ``config.default.FEATURE_COLUMNS``).
@@ -185,7 +180,9 @@ def build_event_table(
             market_ticker=market_ticker,
             data_dir=data_dir,
             benchmark_source=benchmark_source,
-            macro_series=macro_series,
+            macro_features=macro_features,
+            analyst_features=analyst_features,
+            engineered_features=engineered_features,
         )
     feature_cols = list(
         CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns

@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config.default import ANALYST_DERIVED_FEATURES
+from config.default import ANALYST_FEATURES
 
 # Fixed parquet / panel field names after sentiment merge.
 COL_STRONG_BUY = "analystRatingsStrongBuy"
@@ -52,17 +52,17 @@ def _count_arrays(frame: pd.DataFrame) -> tuple[np.ndarray, ...]:
 def compute_analyst_features(
     frame: pd.DataFrame,
     *,
-    derived_features: list[str] | None = None,
+    analyst_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Return a frame with requested derived analyst columns added."""
-    wanted = list(ANALYST_DERIVED_FEATURES if derived_features is None else derived_features)
+    wanted = list(ANALYST_FEATURES if analyst_features is None else analyst_features)
     if not wanted:
         return frame.copy()
 
     unknown = [name for name in wanted if name not in ALL_DERIVED]
     if unknown:
         raise ValueError(
-            f"Unknown ANALYST_DERIVED_FEATURES {unknown}; allowed: {list(ALL_DERIVED)}."
+            f"Unknown ANALYST_FEATURES {unknown}; allowed: {list(ALL_DERIVED)}."
         )
 
     sb, b, h, s, ss = _count_arrays(frame)
@@ -109,7 +109,7 @@ def compute_analyst_features(
 def attach_analyst_features(
     frame: pd.DataFrame,
     *,
-    derived_features: list[str] | None = None,
+    analyst_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Attach derived analyst features onto a daily / aligned panel."""
-    return compute_analyst_features(frame, derived_features=derived_features)
+    return compute_analyst_features(frame, analyst_features=analyst_features)

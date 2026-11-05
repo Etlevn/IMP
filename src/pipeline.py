@@ -12,12 +12,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.features import build_event_table
+from src.events import build_event_table
 from src.metrics import (
     infer_task,
     metrics_table,
     permutation_importance_regression,
     print_model_fit_report,
+    order_summary_table,
     print_summary_table,
     quintile_table,
     summary_row_from_fold_metrics,
@@ -101,7 +102,13 @@ def save_run_artifacts(
         json.dump(run_config, handle, indent=2, default=str)
 
 
-def print_family_config(spec: FamilySpec) -> None:
+def print_family_config(
+    spec: FamilySpec,
+    feature_columns: Sequence[str] | None = None,
+) -> None:
+    columns = list(
+        spec.config.FEATURE_COLUMNS if feature_columns is None else feature_columns
+    )
     print("-" * 60)
     print("CONFIG")
     print("-" * 60)
@@ -112,8 +119,8 @@ def print_family_config(spec: FamilySpec) -> None:
     print(f"BENCHMARK_SOURCE  {spec.config.BENCHMARK_SOURCE}")
     print(f"MARKET_TICKER     {spec.config.MARKET_TICKER}")
     print(f"DATA_ROOT         {spec.config.DATA_ROOT}")
-    print(f"FEATURE_COLUMNS   ({len(spec.config.FEATURE_COLUMNS)})")
-    for name in spec.config.FEATURE_COLUMNS:
+    print(f"FEATURE_COLUMNS   ({len(columns)})")
+    for name in columns:
         print(f"                  - {name}")
     print(f"SPLIT_COLUMN      {spec.config.SPLIT_COLUMN}")
     print(f"TRAIN_END         {spec.config.TRAIN_END}")
@@ -174,21 +181,30 @@ def run_one_model(
     summary = summary_row_from_fold_metrics(
         model_type,
         fold_metrics,
-        quintiles=quintiles,
-        **bundle.summary_extras,
+        predictions=predictions,
     )
     return summary, predictions
 
 
-def run_family(spec: FamilySpec) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def run_family(
+    spec: FamilySpec,
+    *,
+    feature_columns: Sequence[str] | None = None,
+    events: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Full batch run for one model family (config → data → fit).
 
+    ``feature_columns`` overrides ``config.FEATURE_COLUMNS`` for this call.
+    ``events`` skips the panel load when the event table is already built.
     Returns ``(metrics, predictions, run_config)`` with a leading ``family``
     column on the frames. Does not write artifacts; callers merge and save.
     """
     cfg = spec.config
     family = str(spec.name)
-    print_family_config(spec)
+    columns = list(cfg.FEATURE_COLUMNS if feature_columns is None else feature_columns)
+    if not columns:
+        raise ValueError("feature_columns must be non-empty.")
+    print_family_config(spec, columns)
 
     task = infer_task(cfg.TARGET)
     if task != "regression":
@@ -201,22 +217,31 @@ def run_family(spec: FamilySpec) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     if not model_types:
         raise ValueError(f"{spec.model_types_key} must be non-empty.")
 
-    stock_data = load_stock(cfg.DATA_ROOT)
-    earnings = load_earnings(cfg.DATA_ROOT)
-    historical_sentiment_scores = load_sentiment(cfg.DATA_ROOT)
-    df_all = merge_panel(stock_data, earnings, historical_sentiment_scores)
-    df = build_event_table(
-        df_all,
-        market_ticker=cfg.MARKET_TICKER,
-        data_dir=cfg.DATA_ROOT,
-        feature_columns=cfg.FEATURE_COLUMNS,
-        benchmark_source=cfg.BENCHMARK_SOURCE,
-    )
+    if events is None:
+        stock_data = load_stock(cfg.DATA_ROOT)
+        earnings = load_earnings(cfg.DATA_ROOT)
+        historical_sentiment_scores = load_sentiment(cfg.DATA_ROOT)
+        df_all = merge_panel(stock_data, earnings, historical_sentiment_scores)
+        df = build_event_table(
+            df_all,
+            market_ticker=cfg.MARKET_TICKER,
+            data_dir=cfg.DATA_ROOT,
+            feature_columns=columns,
+            benchmark_source=cfg.BENCHMARK_SOURCE,
+        )
+    else:
+        missing = [name for name in columns if name not in events.columns]
+        if missing:
+            raise KeyError(
+                "Feature columns missing from the event table: "
+                f"{missing}. Attach them before build_event_table."
+            )
+        df = events
 
     result = run_preprocess(
         df,
         target=cfg.TARGET,
-        feature_columns=cfg.FEATURE_COLUMNS,
+        feature_columns=columns,
         split_column=cfg.SPLIT_COLUMN,
         train_end=cfg.TRAIN_END,
         val_end=cfg.VAL_END,
@@ -243,7 +268,7 @@ def run_family(spec: FamilySpec) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         summary_rows.append(summary)
         prediction_blocks.append(predictions)
 
-    metrics = pd.DataFrame(summary_rows)
+    metrics = order_summary_table(pd.DataFrame(summary_rows))
     metrics.insert(0, "family", family)
     predictions_all = pd.concat(prediction_blocks, axis=0).reset_index(drop=True)
     predictions_all.insert(0, "family", family)
@@ -259,7 +284,7 @@ def run_family(spec: FamilySpec) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         "BENCHMARK_SOURCE": cfg.BENCHMARK_SOURCE,
         "MARKET_TICKER": cfg.MARKET_TICKER,
         "DATA_ROOT": str(cfg.DATA_ROOT),
-        "FEATURE_COLUMNS": list(cfg.FEATURE_COLUMNS),
+        "FEATURE_COLUMNS": columns,
         "SPLIT_COLUMN": cfg.SPLIT_COLUMN,
         "TRAIN_END": cfg.TRAIN_END,
         "VAL_END": cfg.VAL_END,

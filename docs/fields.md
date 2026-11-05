@@ -58,7 +58,7 @@ Stock return legs use `LastPrice`; market legs use `BenchmarkAdjClose`. Treat `*
 ## Target / label columns
 
 All windows are in **trading days relative to `AnchorDate`**, unless noted.  
-Cumulative window return: **close at `start_offset − 1` through close at `end_offset`** (see `src/features.py`).
+Cumulative window return: **close at `start_offset − 1` through close at `end_offset`** (see `src/events.py`).
 
 | Column         | Description                                                                                                                                |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -72,7 +72,7 @@ Cumulative window return: **close at `start_offset − 1` through close at `end_
 | `vol_ann`      | Sample standard deviation of daily stock returns for offsets in `[-1, +1]`.                                                                |
 | `vol_post`     | Sample standard deviation of daily stock returns for offsets in `[+1, +5]`.                                                                |
 
-Offsets are fixed in `src/features.py`:  
+Offsets are fixed in `src/events.py`:  
 `ANN_START_OFFSET = -1`, `ANN_END_OFFSET = 1`, `POST_START_OFFSET = 1`, `POST_END_OFFSET = 5`.
 
 ---

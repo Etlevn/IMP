@@ -87,8 +87,11 @@ On val/test predictions, sort by \(\hat{y}\) into five equal-count buckets (`pd.
 
 Skipped when predictions are constant or have too few unique values.
 
-The **test**-fold `top_minus_bottom` is also copied into **SUMMARY** / `metrics.csv`
-(as `NaN` when quintiles were skipped for that model).
+`quintile_ls` is a separate test-set long-short return. Cutoffs are the 20th and
+80th percentiles of **training** `y_pred`. On the test fold, go long at or above
+the high cutoff and short at or below the low cutoff. The value is the equal-weight
+mean realized target of the long leg minus the short leg. It is `NaN` when the
+training forecast does not rank (for example lasso shrunk to a constant).
 
 ---
 
@@ -100,13 +103,18 @@ Per model run (typical order):
 2. **METRICS** — train / val / test rows
 3. **FEATURE** — permutation table (optional)
 4. **QUINTILES** — val / test
-5. **SUMMARY** — one test-fold row per model (fit metrics + `top_minus_bottom`)
+5. **SUMMARY** — one test-fold row per model
 
-Written under `output/` (gitignored); multi-family runs merge into one file each:
+Written under `output/` (gitignored); multi-family runs merge into one file each.
+SUMMARY and `metrics.csv` keep `family`, `model`, `n_test`, then
+`oos_r2`, `r2`, `quintile_ls`, `rank_ic`, `ic`, `mae`, `rmse`, `hit_rate`.
+Baseline errors, `top_minus_bottom`, and model parameters stay out of that table.
+`metrics_feat.csv` uses the same columns plus a leading `feature_set`, and sorts
+rows within each model.
 
 | File                  | Contents                                                                 |
 | --------------------- | ------------------------------------------------------------------------ |
-| `metrics.csv`         | SUMMARY rows with `family`, including test `top_minus_bottom` when available |
+| `metrics.csv`         | SUMMARY rows with `family` and the shared metric columns |
 | `predictions.parquet` | Per-event `family`, `y_true`, `y_pred`, `residual`, `fold`, `model`, dates |
 | `run_config.json`     | `{families, by_family}` with per-family settings and fold date ranges    |
 

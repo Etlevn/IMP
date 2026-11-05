@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config.default import BENCHMARK_SOURCE, DATA_DIR, FEATURE_COLUMNS, MARKET_TICKER
-from src.features import build_aligned_panel, build_event_table
+from src.events import build_aligned_panel, build_event_table
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel
 from src.report import print_benchmark_preview, print_event_report
 

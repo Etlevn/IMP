@@ -187,47 +187,49 @@ def format_metrics_for_display(table: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("fold")
 
 
-def format_summary_for_display(table: pd.DataFrame) -> pd.DataFrame:
-    """Compact cross-model SUMMARY (test fold only).
+SUMMARY_ID_COLUMNS = ("feature_set", "family", "model", "n_test")
+SUMMARY_METRIC_COLUMNS = (
+    "oos_r2",
+    "r2",
+    "quintile_ls",
+    "rank_ic",
+    "ic",
+    "mae",
+    "rmse",
+    "hit_rate",
+)
 
-    Keeps family-specific leading columns (e.g. ``alpha``, ``hidden``) and
-    formats the shared metric block like METRICS. Includes test
-    ``top_minus_bottom`` when present (NaN if quintiles were skipped).
+
+def order_summary_table(table: pd.DataFrame) -> pd.DataFrame:
+    """Keep identity columns, then the shared metric columns, and drop the rest.
+
+    Dropped fields include baseline errors, ``top_minus_bottom``, and model
+    parameters such as ``alpha``, ``hidden``, and ``best_iteration``.
     """
-    metric_keys = {
-        "n_test",
-        "r2",
-        "oos_r2",
-        "rmse",
-        "mae",
-        "rmse_train_mean",
-        "mae_train_mean",
-        "rmse_zero",
-        "mae_zero",
-        "ic",
-        "rank_ic",
-        "hit_rate",
-        "top_minus_bottom",
-    }
-    lead_cols = [c for c in table.columns if c not in metric_keys]
+    columns = [
+        column
+        for column in (*SUMMARY_ID_COLUMNS, *SUMMARY_METRIC_COLUMNS)
+        if column in table.columns
+    ]
+    return table.loc[:, columns].copy()
+
+
+def format_summary_for_display(table: pd.DataFrame) -> pd.DataFrame:
+    """Compact SUMMARY using the same columns as the saved metrics table."""
+    ordered = order_summary_table(table)
     rows: list[dict[str, object]] = []
-    for _, row in table.iterrows():
-        out: dict[str, object] = {c: row[c] for c in lead_cols}
-        out["n_test"] = int(row["n_test"])
-        out["r2 (oos)"] = f"{_fmt4(row['r2'])} ({_fmt4(row['oos_r2'])})"
-        out["rmse (mean/zero)"] = _with_baselines(
-            row["rmse"], row["rmse_train_mean"], row["rmse_zero"]
-        )
-        out["mae (mean/zero)"] = _with_baselines(
-            row["mae"], row["mae_train_mean"], row["mae_zero"]
-        )
-        out["ic"] = _fmt4(row["ic"])
-        out["rank_ic"] = _fmt4(row["rank_ic"])
-        out["hit_rate"] = _fmt4(row["hit_rate"])
-        if "top_minus_bottom" in row.index:
-            out["top_minus_bottom"] = _fmt4(row["top_minus_bottom"])
+    for _, row in ordered.iterrows():
+        out: dict[str, object] = {}
+        for column in ordered.columns:
+            value = row[column]
+            if column in SUMMARY_METRIC_COLUMNS:
+                out[column] = _fmt4(value)
+            elif column == "n_test":
+                out[column] = int(value)
+            else:
+                out[column] = value
         rows.append(out)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=list(ordered.columns))
 
 
 def print_metrics_table(table: pd.DataFrame) -> None:
@@ -261,46 +263,28 @@ def print_summary_table(table: pd.DataFrame) -> None:
         print(display.to_string(index=False))
 
 
-def _test_top_minus_bottom(quintiles: pd.DataFrame | None) -> float:
-    """Test-fold ``top_minus_bottom`` from a quintile table, or NaN if missing."""
-    if quintiles is None or quintiles.empty or "fold" not in quintiles.columns:
-        return float("nan")
-    if "top_minus_bottom" not in quintiles.columns:
-        return float("nan")
-    part = quintiles.loc[quintiles["fold"].eq("test"), "top_minus_bottom"]
-    if part.empty:
-        return float("nan")
-    return float(part.iloc[0])
-
-
 def summary_row_from_fold_metrics(
     model_type: str,
     fold_metrics: pd.DataFrame,
     *,
-    quintiles: pd.DataFrame | None = None,
-    **extra: float | int | str,
+    predictions: pd.DataFrame | None = None,
 ) -> dict[str, float | int | str]:
-    """One comparison row: family extras + test-fold metrics (CSV / SUMMARY)."""
+    """One comparison row: test-fold metrics for CSV and SUMMARY."""
     test = fold_metrics.loc["test"]
-    row: dict[str, float | int | str] = {"model": model_type, **extra}
-    row.update(
-        {
-            "n_test": int(test["n"]),
-            "r2": float(test["r2"]),
-            "oos_r2": float(test["oos_r2"]),
-            "rmse": float(test["rmse"]),
-            "mae": float(test["mae"]),
-            "rmse_train_mean": float(test["rmse_train_mean"]),
-            "mae_train_mean": float(test["mae_train_mean"]),
-            "rmse_zero": float(test["rmse_zero"]),
-            "mae_zero": float(test["mae_zero"]),
-            "ic": float(test["ic"]),
-            "rank_ic": float(test["rank_ic"]),
-            "hit_rate": float(test["hit_rate"]),
-            "top_minus_bottom": _test_top_minus_bottom(quintiles),
-        }
-    )
-    return row
+    return {
+        "model": model_type,
+        "n_test": int(test["n"]),
+        "oos_r2": float(test["oos_r2"]),
+        "r2": float(test["r2"]),
+        "quintile_ls": train_quintile_long_short(predictions)
+        if predictions is not None
+        else float("nan"),
+        "rank_ic": float(test["rank_ic"]),
+        "ic": float(test["ic"]),
+        "mae": float(test["mae"]),
+        "rmse": float(test["rmse"]),
+        "hit_rate": float(test["hit_rate"]),
+    }
 
 
 def print_model_fit_report(
@@ -526,3 +510,47 @@ def print_quintile_table(table: pd.DataFrame) -> None:
         print("(skipped: predictions are constant / too few unique values)")
         return
     _print_frame("QUINTILES", table)
+
+
+def train_quintile_long_short(
+    predictions: pd.DataFrame | None,
+    *,
+    low_percentile: float = 20.0,
+    high_percentile: float = 80.0,
+    train_fold: str = "train",
+    test_fold: str = "test",
+) -> float:
+    """Test long-short return from training-set prediction percentiles.
+
+    Thresholds are the training fold's ``low_percentile`` and
+    ``high_percentile`` of ``y_pred``. On the test fold, long when the
+    forecast is at or above the high threshold and short when it is at or
+    below the low threshold. The return is the equal-weight mean realized
+    target of the long leg minus the equal-weight mean of the short leg.
+    A flat training forecast, or an empty test leg, yields NaN.
+    """
+    if predictions is None or predictions.empty:
+        return float("nan")
+    required = {"fold", "y_true", "y_pred"}
+    missing = required - set(predictions.columns)
+    if missing:
+        raise KeyError(f"predictions missing columns: {sorted(missing)}")
+
+    train = pd.to_numeric(
+        predictions.loc[predictions["fold"] == train_fold, "y_pred"], errors="coerce"
+    ).dropna()
+    if train.nunique() < 2:
+        return float("nan")
+    lo, hi = np.percentile(train.to_numpy(dtype=float), [low_percentile, high_percentile])
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return float("nan")
+
+    test = predictions.loc[predictions["fold"] == test_fold, ["y_true", "y_pred"]].copy()
+    test["y_true"] = pd.to_numeric(test["y_true"], errors="coerce")
+    test["y_pred"] = pd.to_numeric(test["y_pred"], errors="coerce")
+    test = test.dropna()
+    long_leg = test.loc[test["y_pred"] >= hi, "y_true"]
+    short_leg = test.loc[test["y_pred"] <= lo, "y_true"]
+    if long_leg.empty or short_leg.empty:
+        return float("nan")
+    return float(long_leg.mean() - short_leg.mean())

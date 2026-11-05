@@ -22,15 +22,6 @@ SENTIMENT_FILE = "historical_sentiment_scores_us.parquet"
 # Backward asof window for monthly analyst snapshots (calendar days).
 SENTIMENT_TOLERANCE_DAYS = 31
 
-# --- analyst derived features (formulas + source cols in src/analyst.py) ---
-# Allowed: Coverage | BuyRatio | SellRatio | RatingScore. Empty list disables.
-ANALYST_DERIVED_FEATURES = [
-    "Coverage",
-    "BuyRatio",
-    "SellRatio",
-    "RatingScore",
-]
-
 # --- benchmark (market-adjusted returns) ---
 # Source: "yahoo" | "equal" | "cap"
 # - yahoo: external ETF via yfinance (uses MARKET_TICKER)
@@ -41,22 +32,33 @@ BENCHMARK_SOURCE = "equal"
 # Common: SPY (default), QQQ, IWM, DIA, VTI.
 MARKET_TICKER = "SPY"
 
-# --- macro (Yahoo daily levels, cached like the yahoo benchmark) ---
-# Maps feature column name -> yfinance ticker. Empty dict disables attach.
-# Cached under data/macro_daily.parquet (+ .json). Add names to FEATURE_COLUMNS to use.
-MACRO_SERIES = {
+# --- feature groups (formulas in src/features/) ---
+# Each group is a switch: an empty list or dict skips that attach.
+# A name enters a model only after it is also listed in FEATURE_COLUMNS.
+
+# Allowed: Coverage | BuyRatio | SellRatio | RatingScore.
+ANALYST_FEATURES = [
+    "Coverage",
+    "BuyRatio",
+    "SellRatio",
+    "RatingScore",
+]
+
+# Maps feature column name -> yfinance ticker. Cached under data/macro_daily.parquet (+ .json).
+MACRO_FEATURES = {
     "vix": "^VIX",
     "tnx": "^TNX",
     "dxy": "DX-Y.NYB",
 }
 
-# --- engineered (from existing panel cols; formulas in src/engineered.py) ---
-# Allowed: mom_21d | vol_21d | log_mcap. Empty list disables attach.
-# Add names to FEATURE_COLUMNS to use in models.
+# Allowed: mom_21d | vol_21d | log_mcap | par_mkt.
+# par_mkt is the reversal-comparison window: close at anchor−5 through close at
+# anchor−2, stock minus benchmark, stored on the decision-day row.
 ENGINEERED_FEATURES = [
     "mom_21d",
     "vol_21d",
     "log_mcap",
+    "par_mkt",
 ]
 
 # --- experiment ---
@@ -85,6 +87,7 @@ FEATURE_COLUMNS = [
     "mom_21d",
     "vol_21d",
     "log_mcap",
+    "par_mkt",
 ]
 
 # Allowed: EventDate | DecisionDate | AnchorDate | ReleaseDate

@@ -44,7 +44,7 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 | `stock_universe.csv`                     | One row per `TickerId` for WRDS / external data mapping (see below) |
 | `benchmark_spy.parquet` / `.json`        | Optional Yahoo SPY cache (when `BENCHMARK_SOURCE=yahoo`) |
 | `benchmark_equal|cap.parquet` / `.json`  | Optional universe-index cache (when `BENCHMARK_SOURCE=equal|cap`) |
-| `macro_daily.parquet` / `.json`          | Optional Yahoo macro cache (`MACRO_SERIES`: vix / tnx / dxy) |
+| `macro_daily.parquet` / `.json`          | Optional Yahoo macro cache (`MACRO_FEATURES`: vix / tnx / dxy) |
 
 Sample panel used in development: on the order of **~200 U.S. names** with price dates **2020–2024** (ticker/symbol counts are not exact equals; see `docs/dataset.md`). Stock returns use `LastPrice` (adjustment convention not stated in-file).
 
@@ -128,7 +128,7 @@ Select families in `main.py` (`FAMILIES`). Classification (`dir_ann`) is reserve
 
 Definitions: [`docs/metrics.md`](docs/metrics.md) (OOS R², baselines, IC, quintiles, permutation importance).
 
-Terminal blocks: **METRICS**, optional **FEATURE**, **QUINTILES**, then **SUMMARY** (test only; includes `top_minus_bottom`).  
+Terminal blocks: **METRICS**, optional **FEATURE**, **QUINTILES**, then **SUMMARY** (test only; same columns as `metrics.csv`).  
 Artifacts under `output/` (gitignored): `metrics.csv`, `predictions.parquet`, `run_config.json`
 (all families merged; rows tagged with a `family` column).
 

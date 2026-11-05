@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config.default import MACRO_SERIES
+from config.default import MACRO_FEATURES
 from src.prepare import DATA_DIR, _row_bar
 
 
@@ -49,7 +49,7 @@ def _download_macro_series(
     end: pd.Timestamp,
 ) -> pd.DataFrame:
     if not series:
-        raise ValueError("MACRO_SERIES is empty.")
+        raise ValueError("MACRO_FEATURES is empty.")
     parts: dict[str, pd.Series] = {}
     for column, ticker in series.items():
         parts[column] = _download_one(ticker, start, end).rename(column)
@@ -64,9 +64,9 @@ def load_macro(
     folder: Path,
     start: pd.Timestamp,
     end: pd.Timestamp,
-    series: dict[str, str] | None = None,
+    macro_features: dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    mapping = dict(MACRO_SERIES if series is None else series)
+    mapping = dict(MACRO_FEATURES if macro_features is None else macro_features)
     if not mapping:
         return pd.DataFrame(columns=["Date"])
 
@@ -117,16 +117,16 @@ def load_macro(
 def attach_macro(
     frame: pd.DataFrame,
     data_dir: Path | None = None,
-    series: dict[str, str] | None = None,
+    macro_features: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Left-merge Yahoo macro columns onto ``frame`` by ``Date``."""
-    mapping = dict(MACRO_SERIES if series is None else series)
+    mapping = dict(MACRO_FEATURES if macro_features is None else macro_features)
     if not mapping:
         return frame.copy()
 
     folder = DATA_DIR if data_dir is None else data_dir
     dates = pd.to_datetime(frame["Date"]).dt.normalize()
-    macro = load_macro(folder, dates.min(), dates.max(), series=mapping)
+    macro = load_macro(folder, dates.min(), dates.max(), macro_features=mapping)
     macro = macro.copy()
     macro["Date"] = pd.to_datetime(macro["Date"]).dt.normalize()
 
