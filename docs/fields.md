@@ -49,9 +49,9 @@ On **`df_all` / `df_align`** (not copied onto `df`):
 
 | Column              | Description                                                                                                                                    |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BenchmarkAdjClose` | SPY adjusted close (Yahoo), attached on `df_align` and used only to build market-adjusted returns. Cached under `data/`. Not a column of `df`. |
+| `BenchmarkAdjClose` | Configured benchmark level on `df_align`, used only to build market-adjusted returns. Cached under `data/`. Not a column of `df`. |
 
-Stock return legs use `LastPrice`; market legs use `BenchmarkAdjClose`. Treat `*_mkt` columns as approximate excess returns across vendors/fields.
+`BENCHMARK_SOURCE` chooses the series: `equal` (equal-weighted `LastPrice` index of the panel; current default), `cap` (same-day `MarketCap` weights), or `yahoo` (adjusted close of `MARKET_TICKER`, default SPY). Stock return legs use `LastPrice`; market legs use `BenchmarkAdjClose`. Treat `*_mkt` columns as approximate excess returns.
 
 ---
 
@@ -63,11 +63,11 @@ Cumulative window return: **close at `start_offset − 1` through close at `end_
 | Column         | Description                                                                                                                                |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ret_ann`      | Announcement window labeled **[-1, +1]** in offsets: close at `AnchorDate−2` → close at `AnchorDate+1` (three trading-day span of closes). |
-| `ret_ann_mkt`  | `ret_ann` minus the same window on SPY. Default modeling target.                                                                           |
+| `ret_ann_mkt`  | `ret_ann` minus the same window on `BenchmarkAdjClose`. Default modeling target.                                                            |
 | `ret_post`     | Post window **[+1, +5]**: close at `AnchorDate` → close at `AnchorDate+5`. Overlaps the ann window on day `+1` by construction.            |
-| `ret_post_mkt` | `ret_post` minus the same window on SPY.                                                                                                   |
+| `ret_post_mkt` | `ret_post` minus the same window on `BenchmarkAdjClose`.                                                                                    |
 | `ret_next`     | One-step forward stock return from the **announcement** (`ReleaseDate`) close to the next trading day.                                     |
-| `ret_next_mkt` | `ret_next` minus the same one-step move on SPY.                                                                                            |
+| `ret_next_mkt` | `ret_next` minus the same one-step move on `BenchmarkAdjClose`.                                                                             |
 | `dir_ann`      | `sign(ret_ann_mkt)` for classification experiments; in this sample almost only `+1` / `−1` (exact zero is rare).                           |
 | `vol_ann`      | Sample standard deviation of daily stock returns for offsets in `[-1, +1]`.                                                                |
 | `vol_post`     | Sample standard deviation of daily stock returns for offsets in `[+1, +5]`.                                                                |
@@ -77,22 +77,11 @@ Offsets are fixed in `src/events.py`:
 
 ---
 
-## Decision-day feature columns (not newly engineered)
+## Decision-day feature columns
 
-These are **copied** from the `DecisionDate` row of `df_align` (not recomputed by IMP). They are the model inputs in `FEATURE_COLUMNS`.
+Every model input is copied from the `DecisionDate` row of `df_align`. Sources, formulas, and short notes are in [`features.md`](features.md).
 
-| Column                     | Source          | Description                                                                                       |
-| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------- |
-| `QScoreTrendLong`          | `stock-data_us` | Long-horizon trend technical score at decision.                                                   |
-| `QScoreSpeedLong`          | `stock-data_us` | Long-horizon speed / momentum score at decision.                                                  |
-| `QScoreLong`               | `stock-data_us` | `Trend + Speed` at decision; omit from `FEATURE_COLUMNS` if Trend and Speed are already included. |
-| `analystRatingsStrongBuy`  | sentiment asof  | Strong Buy count as of decision.                                                                  |
-| `analystRatingsBuy`        | sentiment asof  | Buy count as of decision.                                                                         |
-| `analystRatingsHold`       | sentiment asof  | Hold count as of decision.                                                                        |
-| `analystRatingsSell`       | sentiment asof  | Sell count as of decision.                                                                        |
-| `analystRatingsStrongSell` | sentiment asof  | Strong Sell count as of decision.                                                                 |
-
-Analyst columns exist on the daily panel only after the backward `merge_asof` in `src/prepare.py` (31-day tolerance). A non-trivial share of events can still be null when no snapshot falls in the window.
+The original eight (three QScores and five analyst-rating counts) are vendor fields. `Coverage`, `BuyRatio`, `SellRatio`, `RatingScore`, the macro levels, and `mom_21d`, `vol_21d`, `log_mcap`, `par_mkt`, `par*vix` are built before that copy. A name is attached when its group switch lists it, and it enters a model only when `FEATURE_COLUMNS` or a feature set also lists it.
 
 ---
 

@@ -8,7 +8,7 @@ Predict post-earnings stock behavior from information available **before** the a
 
 - Merge daily prices, earnings events, and monthly analyst ratings
 - NYSE session alignment with BMO / AMC return anchors; decision day = anchor − 2
-- Fixed announcement / post windows and SPY market-adjusted returns
+- Fixed announcement / post windows and market-adjusted returns versus the configured benchmark (`equal` by default)
 - Train / val / test by calendar date; impute and scale **on train only**
 - Multi-model batches via `main.py` (`FAMILIES`) with shared metrics and `output/` artifacts
 
@@ -32,9 +32,9 @@ Shared paths, source filenames, benchmark ticker, target, and split cuts live in
 Place provider Parquet files in `data/` (not redistributed here). Column-level docs:
 
 - [`docs/dataset.md`](docs/dataset.md) — source tables
-- [`docs/fields.md`](docs/fields.md) — event-table dates, labels, decision-day features
+- [`docs/fields.md`](docs/fields.md) — event-table dates and labels
+- [`docs/features.md`](docs/features.md) — each model feature: source, definition, and a short note
 - [`docs/metrics.md`](docs/metrics.md) — evaluation scores and baselines
-- [`docs/data_qa.md`](docs/data_qa.md) — doc vs data QA notes and resolutions
 
 | File                                     | Role                                      |
 | ---------------------------------------- | ----------------------------------------- |
@@ -141,10 +141,10 @@ config/
 model/           estimators
 src/             prepare, sessions, benchmark, macro, analyst, engineered, features, preprocess, metrics, report, pipeline, train
 script/          run_data / run_feature / run_preprocess / export_universe
-docs/            dataset.md, fields.md, metrics.md, data_qa.md
+docs/            dataset.md, fields.md, features.md, metrics.md
 notebook/        demo.ipynb
 main.py
-data/            local Parquet (+ benchmark caches); stock_universe.csv tracked
+data/            local Parquet and caches (gitignored)
 output/          run artifacts (gitignored)
 ```
 
