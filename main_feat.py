@@ -25,13 +25,13 @@ from src.train import FamilyName, FamilySpec, get_family_spec
 # ======================================== [CONFIG] ========================================
 
 # metrics_feat.csv row order. Models stay in MODELS order and form separate groups. Within a model, higher values come first.
-SORT_BY: tuple[str, ...] = ("oos_r2", "quintile_ls", "rank_ic")
+SORT_BY: tuple[str, ...] = ("oos_r2", "rank_ic", "quintile_ls")
 
 # Fixed models. Comment out a family to skip it.
 MODELS: dict[str, tuple[str, ...]] = {
-    "lin": ("ols",),  # "ols" | "ridge" | "lasso"
-    # "tr": ("random_forest",),  # decision_tree | random_forest | hist_gradient_boosting
-    # "nn": ("mlp_deep",),  # mlp_shallow | mlp | mlp_deep
+    "lin": ("ols", "ridge", "lasso"),  # "ols" | "ridge" | "lasso"
+    "tr": ("decision_tree", "random_forest", "hist_gradient_boosting"),  # decision_tree | random_forest | hist_gradient_boosting
+    "nn": ("mlp_shallow", "mlp", "mlp_deep"),  # mlp_shallow | mlp | mlp_deep
 }
 
 # Each name is one experiment. The same MODELS run on every set.
@@ -61,23 +61,6 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
         "vol_21d",
         "log_mcap",
     ),
-    "base+macro": (
-        "QScoreTrendLong",
-        "QScoreSpeedLong",
-        "Coverage",
-        "RatingScore",
-        "vix",
-        "tnx",
-        "dxy",
-    ),
-    "base+par": (
-        "QScoreTrendLong",
-        "QScoreSpeedLong",
-        "Coverage",
-        "RatingScore",
-        "par_mkt",
-    ),
-    "par": ("par_mkt",),
     "base+eng+par": (
         "QScoreTrendLong",
         "QScoreSpeedLong",
@@ -88,7 +71,59 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
         "log_mcap",
         "par_mkt",
     ),
-    "base+eng+par+par*vix": (
+    "base+macro": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "Coverage",
+        "RatingScore",
+        "vix",
+        "tnx",
+        "dxy",
+    ),
+    "base+macro+par": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "Coverage",
+        "RatingScore",
+        "vix",
+        "tnx",
+        "dxy",
+        "par_mkt",
+    ),
+    "base+macro+eng": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "Coverage",
+        "RatingScore",
+        "vix",
+        "tnx",
+        "dxy",
+        "mom_21d",
+        "vol_21d",
+        "log_mcap",
+    ),
+    "base+macro+eng+par": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "Coverage",
+        "RatingScore",
+        "vix",
+        "tnx",
+        "dxy",
+        "mom_21d",
+        "vol_21d",
+        "log_mcap",
+        "par_mkt",
+    ),
+    "base+par": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "Coverage",
+        "RatingScore",
+        "par_mkt",
+    ),
+    "par": ("par_mkt",),
+    "base+eng+macro+par+par*vix": (
         "QScoreTrendLong",
         "QScoreSpeedLong",
         "Coverage",
@@ -96,6 +131,9 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
         "mom_21d",
         "vol_21d",
         "log_mcap",
+        "vix",
+        "tnx",
+        "dxy",
         "par_mkt",
         "par*vix",
     ),

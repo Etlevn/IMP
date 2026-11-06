@@ -190,13 +190,14 @@ def format_metrics_for_display(table: pd.DataFrame) -> pd.DataFrame:
 SUMMARY_ID_COLUMNS = ("feature_set", "family", "model", "n_test")
 SUMMARY_METRIC_COLUMNS = (
     "oos_r2",
-    "r2",
-    "quintile_ls",
     "rank_ic",
+    "quintile_ls",
     "ic",
+    "r2",
     "mae",
     "rmse",
     "hit_rate",
+    "sign_ls",
 )
 
 
@@ -275,15 +276,16 @@ def summary_row_from_fold_metrics(
         "model": model_type,
         "n_test": int(test["n"]),
         "oos_r2": float(test["oos_r2"]),
-        "r2": float(test["r2"]),
+        "rank_ic": float(test["rank_ic"]),
         "quintile_ls": train_quintile_long_short(predictions)
         if predictions is not None
         else float("nan"),
-        "rank_ic": float(test["rank_ic"]),
         "ic": float(test["ic"]),
+        "r2": float(test["r2"]),
         "mae": float(test["mae"]),
         "rmse": float(test["rmse"]),
         "hit_rate": float(test["hit_rate"]),
+        "sign_ls": sign_long_short(predictions),
     }
 
 
@@ -523,11 +525,12 @@ def train_quintile_long_short(
     """Test long-short return from training-set prediction percentiles.
 
     Thresholds are the training fold's ``low_percentile`` and
-    ``high_percentile`` of ``y_pred``. On the test fold, long when the
-    forecast is at or above the high threshold and short when it is at or
-    below the low threshold. The return is the equal-weight mean realized
-    target of the long leg minus the equal-weight mean of the short leg.
-    A flat training forecast, or an empty test leg, yields NaN.
+    ``high_percentile`` of ``y_pred``. On the test fold, a forecast at or
+    above the high threshold is long and one at or below the low threshold
+    is short. Events between the cutoffs are not traded. The value is the
+    equal-weight mean of position times realized target over the traded
+    events, the same averaging as ``sign_ls``. A flat training forecast, or
+    no traded test event, yields NaN.
     """
     if predictions is None or predictions.empty:
         return float("nan")
@@ -549,8 +552,41 @@ def train_quintile_long_short(
     test["y_true"] = pd.to_numeric(test["y_true"], errors="coerce")
     test["y_pred"] = pd.to_numeric(test["y_pred"], errors="coerce")
     test = test.dropna()
-    long_leg = test.loc[test["y_pred"] >= hi, "y_true"]
-    short_leg = test.loc[test["y_pred"] <= lo, "y_true"]
-    if long_leg.empty or short_leg.empty:
+    traded = test.loc[(test["y_pred"] >= hi) | (test["y_pred"] <= lo)]
+    if traded.empty:
         return float("nan")
-    return float(long_leg.mean() - short_leg.mean())
+    position = np.where(traded["y_pred"].to_numpy(dtype=float) >= hi, 1.0, -1.0)
+    realized = traded["y_true"].to_numpy(dtype=float)
+    return float(np.mean(position * realized))
+
+
+def sign_long_short(
+    predictions: pd.DataFrame | None,
+    *,
+    test_fold: str = "test",
+) -> float:
+    """Test-fold mean return from following the forecast sign.
+
+    A positive forecast is long and a negative forecast is short. A zero
+    forecast is flat. The value is the equal-weight mean of
+    sign(y_pred) * y_true. NaN when the test fold has no finite pair, or
+    every forecast is zero.
+    """
+    if predictions is None or predictions.empty:
+        return float("nan")
+    required = {"fold", "y_true", "y_pred"}
+    missing = required - set(predictions.columns)
+    if missing:
+        raise KeyError(f"predictions missing columns: {sorted(missing)}")
+
+    test = predictions.loc[predictions["fold"] == test_fold, ["y_true", "y_pred"]].copy()
+    test["y_true"] = pd.to_numeric(test["y_true"], errors="coerce")
+    test["y_pred"] = pd.to_numeric(test["y_pred"], errors="coerce")
+    test = test.dropna()
+    if test.empty:
+        return float("nan")
+    position = np.sign(test["y_pred"].to_numpy(dtype=float))
+    if np.all(position == 0):
+        return float("nan")
+    realized = test["y_true"].to_numpy(dtype=float)
+    return float(np.mean(position * realized))
