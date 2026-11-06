@@ -21,6 +21,7 @@ Notation: \(y\) = true target, \(\hat{y}\) = model prediction, \(n\) = rows in t
 | `ic`       | Pearson corr\((y,\hat{y})\)                                             | `n/a` if \(y\) or \(\hat{y}\) is constant             |
 | `rank_ic`  | Spearman corr\((y,\hat{y})\)                                            | Same constant-prediction rule                         |
 | `hit_rate` | \(\mathrm{mean}(\mathrm{sign}(y)=\mathrm{sign}(\hat{y}))\)              | Directional agreement; zeros in \(y\) count as misses |
+| `sign_ls`  | \(\mathrm{mean}(\mathrm{sign}(\hat{y})\, y)\) on the test fold          | Long a positive forecast, short a negative one       |
 
 \[
 \mathrm{SSE}(a) = \sum_i (y_i - a_i)^2
@@ -87,8 +88,17 @@ On val/test predictions, sort by \(\hat{y}\) into five equal-count buckets (`pd.
 
 Skipped when predictions are constant or have too few unique values.
 
-The **test**-fold `top_minus_bottom` is also copied into **SUMMARY** / `metrics.csv`
-(as `NaN` when quintiles were skipped for that model).
+`quintile_ls` is a separate test-set long-short return. Cutoffs are the 20th and
+80th percentiles of **training** `y_pred`. On the test fold, go long at or above
+the high cutoff and short at or below the low cutoff. Events between the cutoffs
+are left out. The value is the equal-weight mean of position times realized
+target over the traded events, the same averaging as `sign_ls`. It is `NaN` when
+the training forecast does not rank (for example lasso shrunk to a constant) or
+no test event is traded.
+
+`sign_ls` is the test-fold mean of \(\mathrm{sign}(\hat{y})\, y\). A positive
+forecast is bought and a negative forecast is shorted; a zero forecast stays
+flat and contributes 0. It is `NaN` when every test forecast is zero.
 
 ---
 
@@ -100,14 +110,20 @@ Per model run (typical order):
 2. **METRICS** — train / val / test rows
 3. **FEATURE** — permutation table (optional)
 4. **QUINTILES** — val / test
-5. **SUMMARY** — one test-fold row per model (fit metrics + `top_minus_bottom`)
+5. **SUMMARY** — one test-fold row per model
 
-Written under `output/{lin,tr,nn}/` (gitignored):
+Written under `output/` (gitignored); multi-family runs merge into one file each.
+SUMMARY and `metrics.csv` keep `family`, `model`, `n_test`, then
+`oos_r2`, `rank_ic`, `quintile_ls`, `ic`, `r2`, `mae`, `rmse`, `hit_rate`, `sign_ls`.
+The comparison order is `oos_r2`, then `rank_ic`, then `quintile_ls`.
+Baseline errors, `top_minus_bottom`, and model parameters stay out of that table.
+`metrics_feat.csv` uses the same columns plus a leading `feature_set`, and sorts
+rows within each model by that comparison order.
 
 | File                  | Contents                                                                 |
 | --------------------- | ------------------------------------------------------------------------ |
-| `metrics.csv`         | SUMMARY rows (numeric), including test `top_minus_bottom` when available |
-| `predictions.parquet` | Per-event `y_true`, `y_pred`, `residual`, `fold`, `model`, dates         |
-| `run_config.json`     | Resolved settings and fold date ranges                                   |
+| `metrics.csv`         | SUMMARY rows with `family` and the shared metric columns |
+| `predictions.parquet` | Per-event `family`, `y_true`, `y_pred`, `residual`, `fold`, `model`, dates |
+| `run_config.json`     | `{families, by_family}` with per-family settings, fold date ranges, and a `fits` list (`model`, `hidden_sizes`, `selected_alpha`, `selected_max_depth`, `best_iteration`, `random_state`, `val_oos_r2`, `val_rmse`) |
 
 Implementation: `src/metrics.py`.

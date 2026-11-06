@@ -7,7 +7,19 @@ import pandas as pd
 
 from src.prepare import _row_bar
 
-US_EXCHANGES = {"XNYS", "XNGS", "XNAS", "XNMS", "BATS"}
+# US cash venues that share the NYSE session calendar.
+US_EXCHANGES = {
+    "XNYS",
+    "XNGS",
+    "XNAS",
+    "XNMS",
+    "BATS",
+    "XASE",
+    "XNCM",
+    "ARCX",
+    "XCBO",
+}
+SUPPORTED_EXCHANGES = US_EXCHANGES | {"XTSE"}
 IDENTITY_COLUMNS = (
     "TickerId",
     "ShortName",
@@ -41,15 +53,67 @@ def _sessions(code: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DatetimeI
     return sessions.normalize()
 
 
+def _row_exchange(panel: pd.DataFrame) -> pd.Series:
+    """Exchange code from ``Exchange``, otherwise the part after ``:`` in ``ShortName``."""
+    if "Exchange" in panel.columns:
+        exchange = panel["Exchange"].astype("string").str.strip()
+    else:
+        exchange = pd.Series(pd.NA, index=panel.index, dtype="string")
+    short = (
+        panel["ShortName"].astype("string")
+        if "ShortName" in panel.columns
+        else pd.Series(pd.NA, index=panel.index, dtype="string")
+    )
+    parsed = short.str.split(":", n=1).str[-1].str.strip()
+    has_colon = short.str.contains(":", na=False)
+    blank = exchange.isna() | exchange.eq("")
+    return exchange.mask(blank & has_colon, parsed)
+
+
+def _keep_listed(panel: pd.DataFrame, earnings: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Drop names whose listing has no session calendar.
+
+    Kept venues are ``SUPPORTED_EXCHANGES``. Names with a blank or missing
+    exchange, and venues such as ``XUS``, ``XLON``, and ``OTCPK``, are removed
+    before alignment so they never enter the universe index.
+    """
+    exchange = _row_exchange(panel)
+    listed = pd.DataFrame(
+        {"TickerId": panel["TickerId"].to_numpy(), "exchange": exchange.to_numpy()}
+    )
+
+    def _first(values: pd.Series) -> str:
+        kept = values.dropna().astype("string").str.strip()
+        kept = kept[kept.ne("")]
+        return str(kept.iloc[0]) if len(kept) else ""
+
+    by_ticker = listed.groupby("TickerId", sort=False)["exchange"].agg(_first)
+    keep = set(by_ticker.index[by_ticker.isin(SUPPORTED_EXCHANGES)])
+    panel = panel.loc[panel["TickerId"].isin(keep)].copy()
+    if "TickerId" in earnings.columns:
+        earnings = earnings.loc[earnings["TickerId"].isin(keep)].copy()
+    return panel, earnings
+
+
 def _exchange(frame: pd.DataFrame) -> str:
     if "Exchange" in frame.columns and frame["Exchange"].notna().any():
         return str(frame["Exchange"].dropna().iloc[0])
     return str(frame["ShortName"].dropna().iloc[0]).split(":")[-1]
 
 
+def _usable_market_time(value: object) -> bool:
+    """True only for before-open (1) and after-close (2)."""
+    code = pd.to_numeric(value, errors="coerce")
+    if pd.isna(code):
+        return False
+    return int(code) in (1, 2)
+
+
 def _place_earnings(grid: pd.DataFrame, earnings: pd.DataFrame) -> None:
     sessions = pd.DatetimeIndex(grid.index)
     for row in earnings.itertuples(index=False):
+        if not _usable_market_time(row.MarketTimeId):
+            continue
         day = pd.Timestamp(row.EventDate).normalize()
         if day < sessions[0] or day > sessions[-1]:
             continue
@@ -73,10 +137,17 @@ def _place_earnings(grid: pd.DataFrame, earnings: pd.DataFrame) -> None:
 
 
 def align_trading_sessions(panel: pd.DataFrame, earnings: pd.DataFrame) -> pd.DataFrame:
-    """Reindex each stock onto exchange sessions; map closed-day announcements forward."""
+    """Reindex each listed stock onto exchange sessions.
+
+    Names without a supported exchange are dropped first. Closed-day
+    announcements that remain are mapped forward onto the next session.
+    """
     pieces: list[pd.DataFrame] = []
     earnings = earnings.copy()
     earnings["EventDate"] = pd.to_datetime(earnings["EventDate"])
+    panel, earnings = _keep_listed(panel, earnings)
+    if panel.empty:
+        return panel.reindex(columns=panel.columns)
     groups = list(panel.groupby("TickerId", sort=False))
     with _row_bar(len(panel)) as bar:
         for _ticker, frame in groups:

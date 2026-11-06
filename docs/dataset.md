@@ -12,6 +12,8 @@ Source Parquet tables under `data/`. They are merged into a daily panel (`df_all
 
 Coverage in the development sample is on the order of **~200 U.S. names** and price dates **2020–2024** (ticker / symbol counts are not exactly equal; sentiment snapshots extend outside that price window but only overlapping dates are used).
 
+Columns built from these tables (analyst ratios, macro levels, momentum, `par_mkt`, `par*vix`) are defined in [`features.md`](features.md).
+
 ---
 
 ## `stock-data_us.parquet`
@@ -86,6 +88,3 @@ stock-data_us
                 ↓
         build_event_table → df   (one row per joined announcement)
 ```
-
-Observed schema / counts: [`docs/swagger.yaml`](swagger.yaml).  
-QA notes vs docs: [`data_qa.md`](data_qa.md).

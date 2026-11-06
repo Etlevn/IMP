@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
-from warnings import catch_warnings, filterwarnings
 
 import numpy as np
 import pandas as pd
-from sklearn.exceptions import ConvergenceWarning
 from sklearn.neural_network import MLPRegressor
 
 from src.metrics import evaluate_regression
@@ -87,7 +86,14 @@ def fit_nn_model(
     y_val: pd.Series,
     early_stopping_patience: int = 8,
 ) -> tuple[Any, dict[str, float | int]]:
-    """Fit on train; early-stop by chronological val OOS R² (restore best weights)."""
+    """Fit one epoch at a time; early-stop on chronological validation OOS R².
+
+    ``MLPRegressor.fit`` runs ``max_iter`` additional epochs on every warm-start
+    call. Increasing ``max_iter`` from 1, 2, 3, ... therefore trains a
+    triangular number of epochs. ``partial_fit`` performs exactly one epoch and
+    preserves Adam's optimizer state, so the reported ``best_iteration`` now
+    matches the actual number of passes over the training fold.
+    """
     X_tr = X_train.to_numpy(dtype=float)
     y_tr = np.asarray(y_train, dtype=float)
     X_va = X_val.to_numpy(dtype=float)
@@ -99,44 +105,40 @@ def fit_nn_model(
     best_epoch = 1
     best_oos = float("-inf")
     best_rmse = float("inf")
-    best_coefs: list[np.ndarray] | None = None
-    best_intercepts: list[np.ndarray] | None = None
+    best_model: MLPRegressor | None = None
     stale = 0
 
-    # warm_start + rising max_iter intentionally stops before tol; silence that noise.
-    with catch_warnings():
-        filterwarnings("ignore", category=ConvergenceWarning)
-        for epoch in range(1, max_epochs + 1):
-            probe.set_params(max_iter=epoch)
-            probe.fit(X_tr, y_tr)
-            metrics = evaluate_regression(
-                y_va, probe.predict(X_va), train_y_mean=train_mean
-            )
-            oos = float(metrics["oos_r2"])
-            rmse = float(metrics["rmse"])
-            improved = oos > best_oos + 1e-12 or (
-                np.isclose(oos, best_oos) and rmse < best_rmse
-            )
-            if improved:
-                best_epoch = epoch
-                best_oos = oos
-                best_rmse = rmse
-                best_coefs = [c.copy() for c in probe.coefs_]
-                best_intercepts = [b.copy() for b in probe.intercepts_]
-                stale = 0
-            else:
-                stale += 1
-                if stale >= early_stopping_patience:
-                    break
+    for epoch in range(1, max_epochs + 1):
+        probe.partial_fit(X_tr, y_tr)
+        metrics = evaluate_regression(
+            y_va, probe.predict(X_va), train_y_mean=train_mean
+        )
+        oos = float(metrics["oos_r2"])
+        rmse = float(metrics["rmse"])
+        improved = oos > best_oos + 1e-12 or (
+            np.isclose(oos, best_oos) and rmse < best_rmse
+        )
+        if improved:
+            best_epoch = epoch
+            best_oos = oos
+            best_rmse = rmse
+            # Preserve the complete estimator state at the best epoch, including
+            # Adam's moments, iteration counters, and the fitted network weights.
+            best_model = deepcopy(probe)
+            stale = 0
+        else:
+            stale += 1
+            if stale >= early_stopping_patience:
+                break
 
-    if best_coefs is None or best_intercepts is None:
+    if best_model is None:
         raise RuntimeError("MLP early stopping failed to record any weights.")
 
-    probe.coefs_ = best_coefs
-    probe.intercepts_ = best_intercepts
-    probe.n_iter_ = best_epoch
-    probe.set_params(max_iter=max_epochs, warm_start=False)
-    return probe, {"best_iteration": int(best_epoch)}
+    # ``partial_fit`` reports one iteration per call; expose the total number of
+    # completed epochs for downstream reporting.
+    best_model.n_iter_ = best_epoch
+    best_model.set_params(max_iter=max_epochs, warm_start=False)
+    return best_model, {"best_iteration": int(best_epoch)}
 
 
 def predict_nn(model: Any, X: pd.DataFrame) -> np.ndarray:

@@ -9,11 +9,17 @@ import numpy as np
 import pandas as pd
 
 from config.default import (
+    ANALYST_FEATURES as CONFIG_ANALYST_FEATURES,
     BENCHMARK_SOURCE as CONFIG_BENCHMARK_SOURCE,
+    ENGINEERED_FEATURES as CONFIG_ENGINEERED_FEATURES,
     FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS,
+    MACRO_FEATURES as CONFIG_MACRO_FEATURES,
     MARKET_TICKER as CONFIG_MARKET_TICKER,
 )
 from src.benchmark import BENCHMARK_COLUMN, attach_benchmark
+from src.features.analyst import attach_analyst_features
+from src.features.engineered import attach_engineered_features
+from src.features.macro import attach_macro
 from src.prepare import _row_bar
 from src.sessions import align_trading_sessions
 
@@ -29,9 +35,6 @@ EVENT_COLUMN = "EventDate"
 MARKET_TIME_COLUMN = "MarketTimeId"
 BEFORE_OPEN_ID = 1
 AFTER_CLOSE_ID = 2
-
-# Re-export config list for older ``from src.features import FEATURE_COLUMNS``.
-FEATURE_COLUMNS = list(CONFIG_FEATURE_COLUMNS)
 
 DROP_FROM_PANEL = [
     "symbol",
@@ -98,7 +101,8 @@ def _event_anchors(frame: pd.DataFrame) -> list[tuple[int, int | None]]:
             nxt = announcement + 1
             anchors.append((announcement, nxt if nxt <= last else None))
         else:
-            raise ValueError(f"MarketTimeId must be 1 or 2, got {code}.")
+            # Unknown codes are not placed on the grid; skip if one still arrives.
+            anchors.append((announcement, None))
     return anchors
 
 
@@ -122,19 +126,32 @@ def build_aligned_panel(
     market_ticker: str | None = None,
     data_dir: Path | None = None,
     benchmark_source: str | None = None,
+    macro_features: dict[str, str] | None = None,
+    analyst_features: list[str] | None = None,
+    engineered_features: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Session-align ``df_all`` and attach the market benchmark column."""
+    """Session-align ``df_all`` and attach each enabled feature group."""
     ticker = CONFIG_MARKET_TICKER if market_ticker is None else market_ticker
     source = CONFIG_BENCHMARK_SOURCE if benchmark_source is None else benchmark_source
+    macros = CONFIG_MACRO_FEATURES if macro_features is None else macro_features
+    analyst = CONFIG_ANALYST_FEATURES if analyst_features is None else analyst_features
+    engineered = (
+        CONFIG_ENGINEERED_FEATURES
+        if engineered_features is None
+        else engineered_features
+    )
     earnings = _extract_earnings(df_all)
     panel = _price_panel(df_all)
     df_align = align_trading_sessions(panel, earnings)
-    return attach_benchmark(
+    df_align = attach_benchmark(
         df_align,
         ticker=ticker,
         data_dir=data_dir,
         source=source,
     )
+    df_align = attach_macro(df_align, data_dir=data_dir, macro_features=macros)
+    df_align = attach_analyst_features(df_align, analyst_features=analyst)
+    return attach_engineered_features(df_align, engineered_features=engineered)
 
 
 def build_event_table(
@@ -144,11 +161,14 @@ def build_event_table(
     df_align: pd.DataFrame | None = None,
     feature_columns: Sequence[str] | None = None,
     benchmark_source: str | None = None,
+    macro_features: dict[str, str] | None = None,
+    analyst_features: list[str] | None = None,
+    engineered_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build training event table ``df``: one row per announcement.
 
     Pass ``df_align`` from :func:`build_aligned_panel` to avoid repeating
-    session alignment and benchmark attach.
+    session alignment and feature-group attach.
 
     Feature values are taken from the DecisionDate row for each name in
     ``feature_columns`` (default: ``config.default.FEATURE_COLUMNS``).
@@ -161,6 +181,9 @@ def build_event_table(
             market_ticker=market_ticker,
             data_dir=data_dir,
             benchmark_source=benchmark_source,
+            macro_features=macro_features,
+            analyst_features=analyst_features,
+            engineered_features=engineered_features,
         )
     feature_cols = list(
         CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns

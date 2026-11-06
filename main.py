@@ -18,8 +18,8 @@ from src.train import FamilyName
 # Which model families to run (in order). Comment out entries you do not want.
 FAMILIES: tuple[FamilyName, ...] = (
     "lin",
-    # "tr",
-    # "nn",
+    "tr",
+    "nn",
 )
 # ========================================================================================
 

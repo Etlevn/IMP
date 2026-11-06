@@ -25,7 +25,7 @@ from config.default import (
     TRAIN_END,
     VAL_END,
 )
-from src.features import build_event_table
+from src.events import build_event_table
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel
 from src.preprocess import run_preprocess
 from src.report import print_preprocess_report

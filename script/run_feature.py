@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config.default import BENCHMARK_SOURCE, DATA_DIR, FEATURE_COLUMNS, MARKET_TICKER
-from src.features import build_aligned_panel, build_event_table
+from src.events import build_aligned_panel, build_event_table
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel
 from src.report import print_benchmark_preview, print_event_report
 
@@ -27,6 +27,14 @@ def main() -> None:
         benchmark_source=BENCHMARK_SOURCE,
     )
     print_benchmark_preview(df_align)
+    # Panel: coverage / head / describe (features visible here).
+    print_event_report(
+        df_align,
+        feature_columns=features,
+        label="df_align",
+        correlations=False,
+        targets=False,
+    )
 
     df = build_event_table(
         df_all,
@@ -36,7 +44,14 @@ def main() -> None:
         feature_columns=features,
         benchmark_source=BENCHMARK_SOURCE,
     )
-    print_event_report(df, feature_columns=features)
+    # Event table: correlations + target summary only.
+    print_event_report(
+        df,
+        feature_columns=features,
+        coverage=False,
+        head=False,
+        describe=False,
+    )
 
 
 if __name__ == "__main__":

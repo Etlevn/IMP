@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import builtins
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pandas as pd
@@ -20,13 +24,15 @@ from config.default import (
 ROOT = Path(__file__).resolve().parents[1]
 
 _CHUNK = 50_000
+# Transient row bars sit above this many pinned footer bars.
+_ROW_POS = 0
 
 
 def _row_bar(total: int) -> tqdm:
     return tqdm(
         total=total,
         leave=False,
-        position=0,
+        position=_ROW_POS,
         dynamic_ncols=True,
         desc="",
         unit="",
@@ -34,6 +40,50 @@ def _row_bar(total: int) -> tqdm:
         mininterval=0,
         bar_format="{bar}| {n_fmt}/{total_fmt}",
     )
+
+
+@contextmanager
+def sticky_model_bar(total: int) -> Iterator[tqdm | None]:
+    """Pin one model bar to the bottom row while training is running.
+
+    The bar is cleared when the run finishes. Prints go through ``tqdm.write``
+    so log lines scroll above it. Row bars opened while this is active use the
+    row above it.
+    """
+    global _ROW_POS
+    if total <= 0:
+        yield None
+        return
+
+    bar = tqdm(
+        total=total,
+        leave=False,
+        position=0,
+        dynamic_ncols=True,
+        desc="",
+        miniters=1,
+        mininterval=0,
+        bar_format="{desc}{bar}| {n_fmt}/{total_fmt}",
+    )
+    previous_row = _ROW_POS
+    previous_print = builtins.print
+    _ROW_POS = previous_row + 1
+
+    def _print(*args, sep=" ", end="\n", file=None, flush=False):
+        if file not in (None, sys.stdout):
+            previous_print(*args, sep=sep, end=end, file=file, flush=flush)
+            return
+        tqdm.write(sep.join(str(arg) for arg in args), file=sys.stdout, end=end)
+        if flush:
+            sys.stdout.flush()
+
+    builtins.print = _print
+    try:
+        yield bar
+    finally:
+        builtins.print = previous_print
+        _ROW_POS = previous_row
+        bar.close()
 
 
 def _read_parquet(path: Path) -> pd.DataFrame:
