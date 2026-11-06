@@ -20,18 +20,19 @@ from pathlib import Path
 import pandas as pd
 
 from src.pipeline import run_family
+from src.prepare import sticky_model_bar
 from src.train import FamilyName, FamilySpec, get_family_spec
 
 # ======================================== [CONFIG] ========================================
 
 # metrics_feat.csv row order. Models stay in MODELS order and form separate groups. Within a model, higher values come first.
-SORT_BY: tuple[str, ...] = ("oos_r2", "quintile_ls", "rank_ic")
+SORT_BY: tuple[str, ...] = ("oos_r2", "rank_ic", "quintile_ls")
 
 # Fixed models. Comment out a family to skip it.
 MODELS: dict[str, tuple[str, ...]] = {
-    "lin": ("ols",),  # "ols" | "ridge" | "lasso"
-    # "tr": ("random_forest",),  # decision_tree | random_forest | hist_gradient_boosting
-    # "nn": ("mlp_deep",),  # mlp_shallow | mlp | mlp_deep
+    "lin": ("ols", "ridge", "lasso"),  # "ols" | "ridge" | "lasso"
+    "tr": ("decision_tree", "random_forest", "hist_gradient_boosting"),  # decision_tree | random_forest | hist_gradient_boosting
+    "nn": ("mlp_shallow","mlp","mlp_deep"),  # mlp_shallow | mlp | mlp_deep
 }
 
 # Each name is one experiment. The same MODELS run on every set.
@@ -40,6 +41,11 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
         "QScoreTrendLong",
         "QScoreSpeedLong",
         "QScoreLong",
+        "analystRatingsStrongBuy",
+        "analystRatingsBuy",
+        "analystRatingsHold",
+        "analystRatingsSell",
+        "analystRatingsStrongSell",
     ),
     "base":(
         "QScoreTrendLong",
@@ -62,16 +68,13 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
     "base+eng+macro": (
         "QScoreTrendLong",
         "QScoreSpeedLong",
-        "Coverage",
-        "RatingScore",
-        "par_mkt",
+        "mom_21d",
+        "vol_21d",
+        "log_mcap",
+        "vix",
+        "tnx",
+        "dxy",
     ),
-    "base+par": (
-        "QScoreTrendLong",
-        "QScoreSpeedLong",
-        "par_mkt",
-    ),
-    "par": ("par_mkt",),
     "base+eng+par": (
         "QScoreTrendLong",
         "QScoreSpeedLong",
@@ -80,12 +83,40 @@ FEATURE_SETS: dict[str, tuple[str, ...]] = {
         "log_mcap",
         "par_mkt",
     ),
-    "base+eng+par+par*vix": (
+    "base+macro+par": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "vix",
+        "tnx",
+        "dxy",
+        "par_mkt",
+    ),
+    "base+eng+macro+par": (
         "QScoreTrendLong",
         "QScoreSpeedLong",
         "mom_21d",
         "vol_21d",
         "log_mcap",
+        "vix",
+        "tnx",
+        "dxy",
+        "par_mkt",
+    ),
+    "par": ("par_mkt",),
+    "base+par": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "par_mkt",
+    ),
+    "base+eng+macro+par+par*vix": (
+        "QScoreTrendLong",
+        "QScoreSpeedLong",
+        "mom_21d",
+        "vol_21d",
+        "log_mcap",
+        "vix",
+        "tnx",
+        "dxy",
         "par_mkt",
         "par*vix",
     ),
@@ -252,7 +283,7 @@ def _snapshot(family_configs: dict[str, dict]) -> dict:
     first = next(iter(family_configs.values()))
     shared = {key: first[key] for key in _SHARED_KEYS}
     shared["folds"] = first["folds"]
-    drop = set(_SHARED_KEYS) | _MODEL_TYPE_KEYS | {"family", "FEATURE_COLUMNS", "folds"}
+    drop = set(_SHARED_KEYS) | _MODEL_TYPE_KEYS | {"family", "FEATURE_COLUMNS", "folds", "fits"}
     return {
         "feature_sets": {name: list(columns) for name, columns in FEATURE_SETS.items()},
         "models": {name: list(MODELS[name]) for name in family_configs},
@@ -273,16 +304,20 @@ def main() -> None:
 
     metric_blocks: list[pd.DataFrame] = []
     family_configs: dict[str, dict] = {}
-    for set_name, columns in FEATURE_SETS.items():
-        for spec in specs:
-            metrics, _predictions, run_config = run_family(
-                spec,
-                feature_columns=columns,
-                events=events,
-            )
-            metrics.insert(0, "feature_set", set_name)
-            metric_blocks.append(metrics)
-            family_configs.setdefault(str(spec.name), run_config)
+    total = len(FEATURE_SETS) * sum(len(spec.model_types) for spec in specs)
+    with sticky_model_bar(total) as progress:
+        for set_name, columns in FEATURE_SETS.items():
+            for spec in specs:
+                metrics, _predictions, run_config = run_family(
+                    spec,
+                    feature_columns=columns,
+                    events=events,
+                    progress=progress,
+                    progress_group=set_name,
+                )
+                metrics.insert(0, "feature_set", set_name)
+                metric_blocks.append(metrics)
+                family_configs.setdefault(str(spec.name), run_config)
 
     metrics_all = _sort_metrics(pd.concat(metric_blocks, axis=0, ignore_index=True))
     snapshot = _snapshot(family_configs)

@@ -32,6 +32,7 @@ class FitBundle:
     tuning_label: str = "ALPHA"
     best_iteration: int | None = None
     max_iter: int | None = None
+    hidden_sizes: tuple[int, ...] | None = None
     summary_extras: dict[str, float | int | str] = field(default_factory=dict)
 
 
@@ -236,6 +237,7 @@ def fit_nn(
         tuning_label="ALPHA",
         best_iteration=best_iteration,
         max_iter=int(C.MAX_ITER),
+        hidden_sizes=tuple(int(width) for width in hidden),
         summary_extras={
             "hidden": str(tuple(hidden)),
             "alpha": float(selected_alpha),
