@@ -10,7 +10,7 @@ Attach order on the aligned panel: benchmark, then macro, then derived analyst r
 
 ## Price file
 
-Copied from `stock-data_us.parquet` on the decision day. Not recomputed.
+Copied from `stock_data_us.parquet` on the decision day. Not recomputed.
 
 | Feature | Definition | Note |
 | --- | --- | --- |

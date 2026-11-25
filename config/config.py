@@ -18,7 +18,7 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 # --- source parquet filenames under DATA_DIR ---
 # Expanded panel: 2019-01-02 through 2025-12-31, about 800 names.
 # Sentiment stays on the original ~200-symbol monthly file.
-STOCK_FILE = "stock_data_us_expanded-2019-2026.parquet"  # "stock-data_us.parquet", "stock_data_us_expanded-2019-2026.parquet"
+STOCK_FILE = "stock_data_us_expanded-2019-2026.parquet"  # "stock_data_us.parquet", "stock_data_us_expanded-2019-2026.parquet"
 EARNINGS_FILE = "earnings_us_expanded-2019-2026.parquet"  # "earnings_us.parquet", "earnings_us_expanded-2019-2026.parquet"
 SENTIMENT_FILE = "historical_sentiment_scores_us.parquet"
 # Backward asof window for monthly analyst snapshots (calendar days).

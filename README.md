@@ -38,7 +38,7 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 
 | File                                     | Role                                      |
 | ---------------------------------------- | ----------------------------------------- |
-| `stock-data_us.parquet`                  | Daily prices and QScore features          |
+| `stock_data_us.parquet`                  | Daily prices and QScore features          |
 | `earnings_us.parquet`                    | Event dates and `MarketTimeId`            |
 | `historical_sentiment_scores_us.parquet` | Monthly analyst rating counts             |
 | `stock_universe.csv`                     | One row per `TickerId` for WRDS / external data mapping (see below) |

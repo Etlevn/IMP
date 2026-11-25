@@ -6,7 +6,7 @@ Source Parquet tables under `data/`. They are merged into a daily panel (`df_all
 
 | File                                     | Granularity              | Role                                |
 | ---------------------------------------- | ------------------------ | ----------------------------------- |
-| `stock-data_us.parquet`                  | Ticker × trading day     | Prices and technical scores         |
+| `stock_data_us.parquet`                  | Ticker × trading day     | Prices and technical scores         |
 | `earnings_us.parquet`                    | One row per announcement | Event date and pre/post-market flag |
 | `historical_sentiment_scores_us.parquet` | Ticker × month           | Analyst rating counts               |
 
@@ -16,7 +16,7 @@ Columns built from these tables (analyst ratios, macro levels, momentum, `par_mk
 
 ---
 
-## `stock-data_us.parquet`
+## `stock_data_us.parquet`
 
 Daily equity panel (prices, volume, market cap, and long-horizon QScore features).
 
@@ -46,7 +46,7 @@ Earnings announcement events (calendar date and market timing).
 | Column         | Description                                                                                             |
 | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `Id`           | Unique earnings-event identifier.                                                                       |
-| `TickerId`     | Internal ticker id; intended to match `stock-data_us.TickerId` (a few earnings ids have no price rows). |
+| `TickerId`     | Internal ticker id; intended to match `stock_data_us.TickerId` (a few earnings ids have no price rows). |
 | `EventDate`    | Calendar date of the earnings release (stored as string in the parquet; parsed on load).                |
 | `MarketTimeId` | Release timing vs the session: `1` = before open, `2` = after close. Sets the return anchor session.    |
 
@@ -80,7 +80,7 @@ Attached to the daily panel with a backward `merge_asof` on symbol and date (lat
 ## How the three tables connect
 
 ```
-stock-data_us
+stock_data_us
     ├─ left join earnings_us          (Date/TickerId = EventDate/TickerId)
     └─ asof join historical_sentiment (Symbol/Date ← symbol/date)
                 ↓

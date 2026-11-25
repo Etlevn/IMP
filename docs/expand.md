@@ -8,7 +8,7 @@ Price and earnings inputs now use the expanded files. The analyst-rating file is
 
 | Setting | Current file | Previous file |
 | --- | --- | --- |
-| `STOCK_FILE` | `stock_data_us_expanded-2019-2026.parquet` | `stock-data_us.parquet` |
+| `STOCK_FILE` | `stock_data_us_expanded-2019-2026.parquet` | `stock_data_us.parquet` |
 | `EARNINGS_FILE` | `earnings_us_expanded-2019-2026.parquet` | `earnings_us.parquet` |
 | `SENTIMENT_FILE` | `historical_sentiment_scores_us.parquet` | unchanged |
 
