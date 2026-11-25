@@ -3,9 +3,6 @@
 !.gitignore
 _*/
 notes/
-*.ipynb
-!notebook/demo.ipynb
-!notebook/kalshi.ipynb
 output/
 data/
 __pycache__/
