@@ -1,16 +1,13 @@
 """Tree model settings for the IMP event table.
 
-Shared paths / data / split / target defaults: ``config/default.py``.
+Shared paths / data / split / target defaults: ``config/config.py``.
 """
 
 from __future__ import annotations
 
-from config.default import (
+from config.config import (
     BENCHMARK_SOURCE,
     DATA_ROOT,
-    FEATURE_COLUMNS,
-    FEATURE_IMPORTANCE,
-    FEATURE_IMPORTANCE_REPEATS,
     IMPUTE_STRATEGY,
     MARKET_TICKER,
     OUTPUT_DIR,
@@ -20,9 +17,13 @@ from config.default import (
     TRAIN_END,
     VAL_END,
 )
+from src.features import enabled_features
 
-# Batch label for run_config / logs. Any non-empty string.
-MODEL_LABEL = "tr_batch"
+# Snapshot of enabled catalog at import (ORIGINAL → ANALYST → MACRO → ENGINEERED).
+FEATURE_COLUMNS = enabled_features()
+
+# Label for config / logs. Any non-empty string.
+MODEL_LABEL = "tr"
 
 # Models to run under the same preprocess config (one section each).
 # Allowed: "decision_tree" | "random_forest" | "hist_gradient_boosting"

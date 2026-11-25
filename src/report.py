@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from src.benchmark import BENCHMARK_COLUMN
-from config.default import FEATURE_COLUMNS
+from src.features import enabled_features
 from src.preprocess import PreprocessResult
 
 TARGET_COLUMNS = [
@@ -125,7 +125,9 @@ def _corr_with_target(
     target: str,
     feature_columns: Sequence[str] | None = None,
 ) -> None:
-    feature_cols = list(FEATURE_COLUMNS if feature_columns is None else feature_columns)
+    feature_cols = list(
+        enabled_features() if feature_columns is None else feature_columns
+    )
     cols = [c for c in feature_cols + TARGET_COLUMNS if c in df.columns and c != target]
     if target not in df.columns:
         print(f"{target} not in df")
@@ -149,12 +151,12 @@ def print_notebook_config(
     val_end: str,
     impute_strategy: str | None,
     random_state: int,
-    feature_importance: bool,
-    feature_importance_repeats: int,
     standardize: bool | None = None,
     active_families: Sequence[tuple[str, Mapping[str, Any]]] | None = None,
     benchmark_source: str | None = None,
     market_ticker: str | None = None,
+    models: Mapping[str, Mapping[str, Any]] | None = None,
+    sort_by: str | None = None,
 ) -> None:
     """Print notebook-local CONFIG (shared knobs + optional per-family blocks).
 
@@ -168,7 +170,9 @@ def print_notebook_config(
     if benchmark_source is not None:
         print(f"BENCHMARK_SOURCE  {benchmark_source}")
     if market_ticker is not None:
-        print(f"MARKET_TICKER     {market_ticker}")
+        print(f"MARKET_TICKER     {market_ticker!r}")
+    if sort_by is not None:
+        print(f"SORT_BY           {sort_by}")
     print(f"FEATURE_COLUMNS   ({len(feature_columns)})")
     for name in feature_columns:
         print(f"                  - {name}")
@@ -179,8 +183,12 @@ def print_notebook_config(
     if standardize is not None:
         print(f"STANDARDIZE (step5 preview) {standardize}")
     print(f"RANDOM_STATE      {random_state}")
-    print(f"FEATURE_IMPORTANCE {feature_importance}")
-    print(f"FEATURE_IMPORTANCE_REPEATS {feature_importance_repeats}")
+    if models:
+        print()
+        print("[MODELS]")
+        for family, model_map in models.items():
+            for model_type, combos in model_map.items():
+                print(f"  {family}.{model_type}: {combos}")
     if active_families:
         for family, block in active_families:
             print()

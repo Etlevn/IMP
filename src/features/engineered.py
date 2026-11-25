@@ -9,8 +9,6 @@ Formulas (no lookahead):
                 minus the benchmark return over that same window.
                 Written on the DecisionDate row only. Same window as
                 reversal-comparison.
-    par*vix   = par_mkt * vix on that same DecisionDate row. NaN unless both
-                factors are finite. vix is the macro column already on the panel.
 
 Empty ``ENGINEERED_FEATURES`` disables attach.
 """
@@ -20,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config.default import ENGINEERED_FEATURES
+from config.config import ENGINEERED_FEATURES
 
 PRICE_COLUMN = "LastPrice"
 MCAP_COLUMN = "MarketCap"
@@ -30,8 +28,6 @@ FEAT_MOM_21D = "mom_21d"
 FEAT_VOL_21D = "vol_21d"
 FEAT_LOG_MCAP = "log_mcap"
 FEAT_PAR_MKT = "par_mkt"
-FEAT_PAR_VIX = "par*vix"
-VIX_COLUMN = "vix"
 
 # Close at anchor-5 -> close at anchor-2. Ends on DecisionDate (anchor-2).
 PAR_START_OFFSET = -4
@@ -42,20 +38,23 @@ ALL_ENGINEERED = (
     FEAT_VOL_21D,
     FEAT_LOG_MCAP,
     FEAT_PAR_MKT,
-    FEAT_PAR_VIX,
 )
 
 
 def _mom_21d(ordered: pd.DataFrame, window: int = DEFAULT_WINDOW) -> pd.Series:
     """W-day price momentum on a TickerId/Date-sorted frame."""
     price = pd.to_numeric(ordered[PRICE_COLUMN], errors="coerce")
-    return price.groupby(ordered["TickerId"], sort=False).pct_change(window)
+    return price.groupby(ordered["TickerId"], sort=False).pct_change(
+        window, fill_method=None
+    )
 
 
 def _vol_21d(ordered: pd.DataFrame, window: int = DEFAULT_WINDOW) -> pd.Series:
     """W-day rolling std of daily returns on a TickerId/Date-sorted frame."""
     price = pd.to_numeric(ordered[PRICE_COLUMN], errors="coerce")
-    ret_1d = price.groupby(ordered["TickerId"], sort=False).pct_change()
+    ret_1d = price.groupby(ordered["TickerId"], sort=False).pct_change(
+        fill_method=None
+    )
     return (
         ret_1d.groupby(ordered["TickerId"], sort=False)
         .rolling(window, min_periods=window)
@@ -109,19 +108,6 @@ def _par_mkt(ordered: pd.DataFrame, window: int = DEFAULT_WINDOW) -> pd.Series:
     return values
 
 
-def _par_vix(par: pd.Series, ordered: pd.DataFrame) -> pd.Series:
-    """Decision-day product of par_mkt and the panel's raw vix column."""
-    if VIX_COLUMN not in ordered.columns:
-        raise KeyError(
-            "Panel missing 'vix' required for par*vix. "
-            "Keep vix in MACRO_FEATURES so it is attached before engineered features."
-        )
-    vix = pd.to_numeric(ordered[VIX_COLUMN], errors="coerce").to_numpy(dtype=float)
-    par_values = par.to_numpy(dtype=float)
-    product = np.where(np.isfinite(par_values) & np.isfinite(vix), par_values * vix, np.nan)
-    return pd.Series(product, index=ordered.index, name=FEAT_PAR_VIX)
-
-
 _BUILDERS = {
     FEAT_MOM_21D: lambda ordered, window: _mom_21d(ordered, window),
     FEAT_VOL_21D: lambda ordered, window: _vol_21d(ordered, window),
@@ -165,16 +151,8 @@ def compute_engineered_features(
         out = out.drop(columns=drop_cols)
 
     ordered = out.sort_values(["TickerId", "Date"], kind="mergesort")
-    par: pd.Series | None = None
     for name in wanted:
-        if name == FEAT_PAR_VIX:
-            if par is None:
-                par = _par_mkt(ordered, window)
-            series = _par_vix(par, ordered)
-        else:
-            series = _BUILDERS[name](ordered, window)
-            if name == FEAT_PAR_MKT:
-                par = series
+        series = _BUILDERS[name](ordered, window)
         out.loc[ordered.index, name] = series.to_numpy(dtype=float)
 
     return out

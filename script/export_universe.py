@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 
-from config.default import DATA_DIR
+from config.config import DATA_DIR
 from src.prepare import load_stock
 
 # --- run config (edit here) ---

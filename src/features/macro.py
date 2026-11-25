@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config.default import MACRO_FEATURES
+from config.config import MACRO_FEATURES
 from src.prepare import DATA_DIR, _row_bar
 
 

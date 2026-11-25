@@ -4,7 +4,7 @@ Price and earnings inputs now use the expanded files. The analyst-rating file is
 
 ## Data files
 
-`config/default.py`:
+`config/config.py`:
 
 | Setting | Current file | Previous file |
 | --- | --- | --- |
@@ -32,6 +32,6 @@ The expanded earnings file has 249 null `MarketTimeId` values and one value equa
 
 ## Unchanged settings
 
-`TRAIN_END` remains 2022-12-31 and `VAL_END` remains 2023-12-31, so the test fold covers 2024 and 2025. The equal-weight benchmark is rebuilt from the new panel the next time the event table is built. The macro cache currently covers about 2020–2024 and is re-downloaded for the new date span when `vix` or `par*vix` is used.
+`TRAIN_END` remains 2022-12-31 and `VAL_END` remains 2023-12-31, so the test fold covers 2024 and 2025. The equal-weight benchmark is rebuilt from the new panel the next time the event table is built. The macro cache currently covers about 2020–2024 and is re-downloaded for the new date span when macro features such as `vix` are used.
 
-The new sample uses a different benchmark universe and a longer test window than the earlier run of about 200 names with a 2024-only test. Those `metrics_feat` tables are not directly comparable.
+The new sample uses a different benchmark universe and a longer test window than the earlier run of about 200 names with a 2024-only test. Earlier metric tables from that panel are not directly comparable.

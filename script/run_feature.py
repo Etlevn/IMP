@@ -7,14 +7,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.default import BENCHMARK_SOURCE, DATA_DIR, FEATURE_COLUMNS, MARKET_TICKER
+from config.config import BENCHMARK_SOURCE, DATA_DIR, MARKET_TICKER
 from src.events import build_aligned_panel, build_event_table
+from src.features import enabled_features
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel
 from src.report import print_benchmark_preview, print_event_report
 
 
 def main() -> None:
-    features = list(FEATURE_COLUMNS)
+    features = enabled_features()
     stock_data = load_stock(DATA_DIR)
     earnings = load_earnings(DATA_DIR)
     historical_sentiment_scores = load_sentiment(DATA_DIR)

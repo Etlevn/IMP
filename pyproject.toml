@@ -16,6 +16,7 @@ dependencies = [
     "ipywidgets",
     "wrds",
     "requests",
+    "optuna",
 ]
 
 [build-system]

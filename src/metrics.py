@@ -5,13 +5,9 @@ Classification helpers are reserved for a later extension.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-PredictFn = Callable[[pd.DataFrame], np.ndarray]
 
 REGRESSION_TARGETS = frozenset(
     {
@@ -187,7 +183,7 @@ def format_metrics_for_display(table: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("fold")
 
 
-SUMMARY_ID_COLUMNS = ("feature_set", "family", "model", "n_test")
+SUMMARY_ID_COLUMNS = ("family", "model", "n_test")
 SUMMARY_METRIC_COLUMNS = (
     "oos_r2",
     "rank_ic",
@@ -204,12 +200,13 @@ SUMMARY_METRIC_COLUMNS = (
 def order_summary_table(table: pd.DataFrame) -> pd.DataFrame:
     """Keep identity columns, then the shared metric columns, and drop the rest.
 
-    Dropped fields include baseline errors, ``top_minus_bottom``, and model
-    parameters such as ``alpha``, ``hidden``, and ``best_iteration``.
+    ``features`` (when present) is kept last. Dropped fields include baseline
+    errors, ``top_minus_bottom``, and model parameters such as ``alpha``,
+    ``hidden``, and ``best_iteration``.
     """
     columns = [
         column
-        for column in (*SUMMARY_ID_COLUMNS, *SUMMARY_METRIC_COLUMNS)
+        for column in (*SUMMARY_ID_COLUMNS, *SUMMARY_METRIC_COLUMNS, "features")
         if column in table.columns
     ]
     return table.loc[:, columns].copy()
@@ -260,6 +257,8 @@ def print_summary_table(table: pd.DataFrame) -> None:
         None,
         "display.expand_frame_repr",
         False,
+        "display.max_colwidth",
+        None,
     ):
         print(display.to_string(index=False))
 
@@ -299,9 +298,8 @@ def print_model_fit_report(
     tuning_label: str = "ALPHA",
     best_iteration: int | None = None,
     max_iter: int | None = None,
-    importance: pd.DataFrame | None = None,
 ) -> None:
-    """Print one model's tuning, early-stop, metrics, importance, and quintiles."""
+    """Print one model's tuning, early-stop, metrics, and quintiles."""
     print()
     print("=" * 60)
     print(model_type.upper())
@@ -338,90 +336,7 @@ def print_model_fit_report(
     print()
     print_metrics_table(fold_metrics)
 
-    if importance is not None:
-        print()
-        print_feature_importance(importance)
-
     print_quintile_table(quintiles)
-
-
-def permutation_importance_regression(
-    predict_fn: PredictFn,
-    X: pd.DataFrame,
-    y: pd.Series | np.ndarray,
-    *,
-    n_repeats: int = 10,
-    random_state: int = 42,
-    train_y_mean: float | None = None,
-) -> pd.DataFrame:
-    """Model-conditional feature importance via column permutation.
-
-    Positive ``delta_rmse`` / ``delta_mae`` and positive ``delta_ic`` /
-    ``delta_rank_ic`` / ``delta_hit_rate`` / ``delta_oos_r2`` mean the feature
-    helps the fitted model on this fold (shuffling hurts performance).
-    """
-    if n_repeats < 1:
-        raise ValueError(f"n_repeats must be >= 1, got {n_repeats}")
-
-    y_true = np.asarray(y, dtype=float)
-    baseline_pred = np.asarray(predict_fn(X), dtype=float)
-    base = evaluate_regression(y_true, baseline_pred, train_y_mean=train_y_mean)
-    rng = np.random.default_rng(random_state)
-
-    rows: list[dict[str, float | str]] = []
-    for column in X.columns:
-        rmse_deltas: list[float] = []
-        mae_deltas: list[float] = []
-        ic_deltas: list[float] = []
-        rank_ic_deltas: list[float] = []
-        hit_deltas: list[float] = []
-        oos_deltas: list[float] = []
-        for _ in range(n_repeats):
-            shuffled = X.copy()
-            values = shuffled[column].to_numpy(copy=True)
-            rng.shuffle(values)
-            shuffled[column] = values
-            perm = evaluate_regression(
-                y_true, predict_fn(shuffled), train_y_mean=train_y_mean
-            )
-            rmse_deltas.append(perm["rmse"] - base["rmse"])
-            mae_deltas.append(perm["mae"] - base["mae"])
-            ic_deltas.append(base["ic"] - perm["ic"])
-            rank_ic_deltas.append(base["rank_ic"] - perm["rank_ic"])
-            hit_deltas.append(base["hit_rate"] - perm["hit_rate"])
-            oos_deltas.append(base["oos_r2"] - perm["oos_r2"])
-        rows.append(
-            {
-                "feature": column,
-                "delta_rmse": float(np.mean(rmse_deltas)),
-                "delta_mae": float(np.mean(mae_deltas)),
-                "delta_ic": float(np.mean(ic_deltas)),
-                "delta_rank_ic": float(np.mean(rank_ic_deltas)),
-                "delta_hit_rate": float(np.mean(hit_deltas)),
-                "delta_oos_r2": float(np.mean(oos_deltas)),
-            }
-        )
-
-    table = pd.DataFrame(rows).set_index("feature")
-    return table.sort_values("delta_ic", ascending=False)
-
-
-def print_feature_importance(table: pd.DataFrame) -> None:
-    """Print the FEATURE block to the terminal."""
-    print("-" * 60)
-    print("FEATURE")
-    print("-" * 60)
-    with pd.option_context(
-        "display.max_columns",
-        None,
-        "display.width",
-        None,
-        "display.expand_frame_repr",
-        False,
-        "display.float_format",
-        lambda x: f"{x:.4f}",
-    ):
-        print(table.to_string())
 
 
 def _print_frame(title: str, table: pd.DataFrame) -> None:

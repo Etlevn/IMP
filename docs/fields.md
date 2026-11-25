@@ -51,7 +51,7 @@ On **`df_all` / `df_align`** (not copied onto `df`):
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `BenchmarkAdjClose` | Configured benchmark level on `df_align`, used only to build market-adjusted returns. Cached under `data/`. Not a column of `df`. |
 
-`BENCHMARK_SOURCE` chooses the series: `equal` (equal-weighted `LastPrice` index of the panel; current default), `cap` (same-day `MarketCap` weights), or `yahoo` (adjusted close of `MARKET_TICKER`, default SPY). Stock return legs use `LastPrice`; market legs use `BenchmarkAdjClose`. Treat `*_mkt` columns as approximate excess returns.
+`BENCHMARK_SOURCE` chooses the series: `equal` (equal-weighted `LastPrice` index of the panel; current default), `cap` (same-day `MarketCap` weights), or `yahoo` (adjusted close of `MARKET_TICKER`, e.g. SPY). `MARKET_TICKER` may be empty when the source is `equal` / `cap`; it is required for `yahoo`. Stock return legs use `LastPrice`; market legs use `BenchmarkAdjClose`. Treat `*_mkt` columns as approximate excess returns.
 
 ---
 
@@ -81,7 +81,7 @@ Offsets are fixed in `src/events.py`:
 
 Every model input is copied from the `DecisionDate` row of `df_align`. Sources, formulas, and short notes are in [`features.md`](features.md).
 
-The original eight (three QScores and five analyst-rating counts) are vendor fields. `Coverage`, `BuyRatio`, `SellRatio`, `RatingScore`, the macro levels, and `mom_21d`, `vol_21d`, `log_mcap`, `par_mkt`, `par*vix` are built before that copy. A name is attached when its group switch lists it, and it enters a model only when `FEATURE_COLUMNS` or a feature set also lists it.
+The original eight (three QScores and five analyst-rating counts) are vendor fields listed in `ORIGINAL_FEATURES`. Derived columns are built in `src/features/` and registered in the analyst / macro / engineered groups. Commenting a name out of its group removes it from `enabled_features()`, which feeds `main` / `feat_filter` / `feat_optuna`.
 
 ---
 

@@ -12,7 +12,7 @@ Source Parquet tables under `data/`. They are merged into a daily panel (`df_all
 
 Coverage in the development sample is on the order of **~200 U.S. names** and price dates **2020–2024** (ticker / symbol counts are not exactly equal; sentiment snapshots extend outside that price window but only overlapping dates are used).
 
-Columns built from these tables (analyst ratios, macro levels, momentum, `par_mkt`, `par*vix`) are defined in [`features.md`](features.md).
+Columns built from these tables (analyst ratios, macro levels, momentum, `par_mkt`) are defined in [`features.md`](features.md).
 
 ---
 

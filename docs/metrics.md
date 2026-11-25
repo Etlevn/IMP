@@ -57,25 +57,6 @@ HistGBDT / MLP early stopping also monitor val `oos_r2`.
 
 ---
 
-## FEATURE (permutation importance)
-
-Optional; computed on the **test** fold after fit (config `FEATURE_IMPORTANCE`).
-
-For each feature, shuffle that column `FEATURE_IMPORTANCE_REPEATS` times and measure metric change vs the unshuffled prediction:
-
-| Column           | Meaning (positive ⇒ feature helps)    |
-| ---------------- | ------------------------------------- |
-| `delta_rmse`     | shuffled RMSE − baseline RMSE         |
-| `delta_mae`      | shuffled MAE − baseline MAE           |
-| `delta_ic`       | baseline IC − shuffled IC             |
-| `delta_rank_ic`  | baseline rank IC − shuffled rank IC   |
-| `delta_hit_rate` | baseline hit rate − shuffled hit rate |
-| `delta_oos_r2`   | baseline OOS R² − shuffled OOS R²     |
-
-Table is sorted by `delta_ic` descending. Importance is **model-conditional** (depends on the fitted model and feature set).
-
----
-
 ## QUINTILES
 
 On val/test predictions, sort by \(\hat{y}\) into five equal-count buckets (`pd.qcut`):
@@ -108,22 +89,34 @@ Per model run (typical order):
 
 1. **ALPHA** / depth grid / **EARLY_STOP** (if applicable)
 2. **METRICS** — train / val / test rows
-3. **FEATURE** — permutation table (optional)
-4. **QUINTILES** — val / test
-5. **SUMMARY** — one test-fold row per model
+3. **QUINTILES** — val / test
+4. **SUMMARY** — printed once at the end of the run (all models merged; with `VERBOSE_PRINT=False` in `main.py`, only the table rows, no banner)
 
 Written under `output/` (gitignored); multi-family runs merge into one file each.
-SUMMARY and `metrics.csv` keep `family`, `model`, `n_test`, then
+SUMMARY and `main_metrics.csv` keep `family`, `model`, `n_test`, then
 `oos_r2`, `rank_ic`, `quintile_ls`, `ic`, `r2`, `mae`, `rmse`, `hit_rate`, `sign_ls`.
 The comparison order is `oos_r2`, then `rank_ic`, then `quintile_ls`.
 Baseline errors, `top_minus_bottom`, and model parameters stay out of that table.
-`metrics_feat.csv` uses the same columns plus a leading `feature_set`, and sorts
-rows within each model by that comparison order.
+
+`feat_optuna_trial.csv` stores every Optuna / exhaustive trial with
+validation scores (`n_val`, `val_oos_r2`, …), test SUMMARY columns, and a
+per-model `best` flag. Selection metric is `feat_optuna.OBJECTIVE`
+(`oos_r2` | `rank_ic` | `quintile_ls`); rows sort by model then that val column
+descending. `feat_optuna_best.csv` keeps only `best=1` rows with
+`family`, `model`, `features`, `n_features`, `n_val`, the OBJECTIVE val
+column (`val_oos_r2` / `val_rank_ic` / `val_quintile_ls`), `n_test`, then
+SUMMARY metrics. Companion config (`config_optuna.json`) stores search
+settings only, not trial or best rows.
 
 | File                  | Contents                                                                 |
 | --------------------- | ------------------------------------------------------------------------ |
-| `metrics.csv`         | SUMMARY rows with `family` and the shared metric columns |
-| `predictions.parquet` | Per-event `family`, `y_true`, `y_pred`, `residual`, `fold`, `model`, dates |
-| `run_config.json`     | `{families, by_family}` with per-family settings, fold date ranges, and a `fits` list (`model`, `hidden_sizes`, `selected_alpha`, `selected_max_depth`, `best_iteration`, `random_state`, `val_oos_r2`, `val_rmse`) |
+| `main_metrics.csv`    | SUMMARY rows with `family` / metrics / trailing `features`; sorted by `SORT_BY` |
+| `feat_filter.csv`     | Train-fold screen rows (`suggest` + IC / corr) |
+| `feat_optuna_trial.csv` | Per-trial search rows (`val_*` + test metrics, `best`) |
+| `feat_optuna_best.csv`  | Per-model best: `n_val` + OBJECTIVE `val_*` + test SUMMARY |
+| `main_predictions.parquet` | Per-event predictions (`SAVE_PREDICTIONS` in `main.py`) |
+| `config_main.json` | `main.py` settings: `shared` + `runs[]` (`model` / `family` / `features` + used hypers; no fits) |
+| `config_filter.json` | `feat_filter.py` settings only (thresholds / features / shared; no rows) |
+| `config_optuna.json` | Search settings only (no trial / best results) |
 
 Implementation: `src/metrics.py`.

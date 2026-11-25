@@ -8,14 +8,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from config.default import (
+from config.config import (
     ANALYST_FEATURES as CONFIG_ANALYST_FEATURES,
     BENCHMARK_SOURCE as CONFIG_BENCHMARK_SOURCE,
     ENGINEERED_FEATURES as CONFIG_ENGINEERED_FEATURES,
-    FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS,
     MACRO_FEATURES as CONFIG_MACRO_FEATURES,
     MARKET_TICKER as CONFIG_MARKET_TICKER,
 )
+from src.features import enabled_features
 from src.benchmark import BENCHMARK_COLUMN, attach_benchmark
 from src.features.analyst import attach_analyst_features
 from src.features.engineered import attach_engineered_features
@@ -171,7 +171,7 @@ def build_event_table(
     session alignment and feature-group attach.
 
     Feature values are taken from the DecisionDate row for each name in
-    ``feature_columns`` (default: ``config.default.FEATURE_COLUMNS``).
+    ``feature_columns`` (default: ``src.features.enabled_features()``).
 
     Raises ``KeyError`` if any requested feature is missing from ``df_align``.
     """
@@ -186,14 +186,14 @@ def build_event_table(
             engineered_features=engineered_features,
         )
     feature_cols = list(
-        CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns
+        enabled_features() if feature_columns is None else feature_columns
     )
     missing = [c for c in feature_cols if c not in df_align.columns]
     if missing:
         raise KeyError(
             "Feature columns missing from aligned panel (df_align): "
             f"{missing}. Attach the source columns before build_event_table, "
-            "or remove them from FEATURE_COLUMNS."
+            "or remove them from the matching feature group in config/config.py."
         )
 
     rows: list[dict] = []

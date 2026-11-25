@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config.default import FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS
+from src.features import enabled_features
 
 ALLOWED_IMPUTE = {None, "median", "mean", "drop"}
 ALLOWED_SPLIT = {
@@ -103,9 +103,9 @@ def drop_missing_target(df: pd.DataFrame, target: str) -> tuple[pd.DataFrame, in
 
 
 def _resolve_features(feature_columns: list[str] | None, df: pd.DataFrame) -> list[str]:
-    cols = list(CONFIG_FEATURE_COLUMNS if feature_columns is None else feature_columns)
+    cols = list(enabled_features() if feature_columns is None else feature_columns)
     if not cols:
-        raise ValueError("FEATURE_COLUMNS must be non-empty.")
+        raise ValueError("feature_columns must be non-empty.")
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise KeyError(f"Feature columns missing from df: {missing}.")

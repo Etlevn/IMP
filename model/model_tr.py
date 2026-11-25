@@ -14,7 +14,7 @@ from src.metrics import evaluate_regression
 ALLOWED_TREE_TYPES = frozenset(
     {"decision_tree", "random_forest", "hist_gradient_boosting"}
 )
-# All batch members select max_depth on the chronological val fold.
+# Tree models select max_depth on the chronological val fold.
 DEPTH_TUNABLE_TYPES = ALLOWED_TREE_TYPES
 EARLY_STOP_TYPES = frozenset({"hist_gradient_boosting"})
 

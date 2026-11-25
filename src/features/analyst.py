@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from config.default import ANALYST_FEATURES
+from config.config import ANALYST_FEATURES
 
 # Fixed parquet / panel field names after sentiment merge.
 COL_STRONG_BUY = "analystRatingsStrongBuy"

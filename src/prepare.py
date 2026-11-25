@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import builtins
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm.auto import tqdm
 
-from config.default import (
+from config.config import (
     DATA_DIR,
     EARNINGS_FILE,
     SENTIMENT_FILE,
@@ -44,31 +44,41 @@ def _row_bar(total: int) -> tqdm:
 
 
 @contextmanager
-def sticky_model_bar(total: int) -> Iterator[tqdm | None]:
-    """Pin one model bar to the bottom row while training is running.
+def sticky_stack(totals: Sequence[int]) -> Iterator[tuple[tqdm | None, ...]]:
+    """Pin one or more footer bars (outer first / top, inner last / bottom).
 
-    The bar is cleared when the run finishes. Prints go through ``tqdm.write``
-    so log lines scroll above it. Row bars opened while this is active use the
-    row above it.
+    ``totals[0]`` is the top sticky (e.g. models); ``totals[-1]`` is the
+    bottom sticky (e.g. trials). Prints go through ``tqdm.write``. Row bars
+    opened while active use positions above the stack.
     """
     global _ROW_POS
-    if total <= 0:
-        yield None
+    values = [int(total) for total in totals]
+    if not values:
+        yield ()
         return
 
-    bar = tqdm(
-        total=total,
-        leave=False,
-        position=0,
-        dynamic_ncols=True,
-        desc="",
-        miniters=1,
-        mininterval=0,
-        bar_format="{desc}{bar}| {n_fmt}/{total_fmt}",
-    )
     previous_row = _ROW_POS
     previous_print = builtins.print
-    _ROW_POS = previous_row + 1
+    n = len(values)
+    bars: list[tqdm | None] = []
+    for index, total in enumerate(values):
+        if total <= 0:
+            bars.append(None)
+            continue
+        # tqdm position 0 is the top line; later indexes render below.
+        bars.append(
+            tqdm(
+                total=total,
+                leave=False,
+                position=index,
+                dynamic_ncols=True,
+                desc="",
+                miniters=1,
+                mininterval=0,
+                bar_format="{desc}{bar}| {n_fmt}/{total_fmt}",
+            )
+        )
+    _ROW_POS = previous_row + n
 
     def _print(*args, sep=" ", end="\n", file=None, flush=False):
         if file not in (None, sys.stdout):
@@ -80,11 +90,24 @@ def sticky_model_bar(total: int) -> Iterator[tqdm | None]:
 
     builtins.print = _print
     try:
-        yield bar
+        yield tuple(bars)
     finally:
         builtins.print = previous_print
         _ROW_POS = previous_row
-        bar.close()
+        # Close bottom-up so tqdm clears nested positions without leaving the
+        # cursor mid-line (which eats the next print's first character).
+        for bar in reversed(bars):
+            if bar is not None:
+                bar.close()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
+@contextmanager
+def sticky_model_bar(total: int) -> Iterator[tqdm | None]:
+    """Pin one model bar to the bottom row while training is running."""
+    with sticky_stack((total,)) as bars:
+        yield bars[0] if bars else None
 
 
 def _read_parquet(path: Path) -> pd.DataFrame:

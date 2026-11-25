@@ -1,6 +1,6 @@
 """Build the event table, run train-only preprocessing, and print a summary.
 
-Shared defaults come from ``config/default.py``. Local overrides below are
+Shared defaults come from ``config/config.py``. Local overrides below are
 script-only (e.g. STANDARDIZE); model runs use ``config/config_*.py``.
 
 Usage (from repo root):
@@ -14,10 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.default import (
+from config.config import (
     BENCHMARK_SOURCE,
     DATA_DIR,
-    FEATURE_COLUMNS as CONFIG_FEATURE_COLUMNS,
     IMPUTE_STRATEGY,
     MARKET_TICKER,
     SPLIT_COLUMN,
@@ -26,13 +25,14 @@ from config.default import (
     VAL_END,
 )
 from src.events import build_event_table
+from src.features import enabled_features
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel
 from src.preprocess import run_preprocess
 from src.report import print_preprocess_report
 
 # ============================== [LOCAL OVERRIDES] ==============================
 
-# Feature list. None uses config.default.FEATURE_COLUMNS.
+# Feature list. None uses src.features.enabled_features().
 FEATURE_COLUMNS = None
 
 # Z-score features with train mean/std. Allowed: True | False
@@ -43,7 +43,7 @@ STANDARDIZE = True
 
 def _resolved_features() -> list[str]:
     if FEATURE_COLUMNS is None:
-        return list(CONFIG_FEATURE_COLUMNS)
+        return enabled_features()
     return list(FEATURE_COLUMNS)
 
 

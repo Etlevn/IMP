@@ -10,7 +10,7 @@ Predict post-earnings stock behavior from information available **before** the a
 - NYSE session alignment with BMO / AMC return anchors; decision day = anchor − 2
 - Fixed announcement / post windows and market-adjusted returns versus the configured benchmark (`equal` by default)
 - Train / val / test by calendar date; impute and scale **on train only**
-- Multi-model batches via `main.py` (`FAMILIES`) with shared metrics and `output/` artifacts
+- Multi-model runs via `main.py` (`MODELS`: family → model → feature combo(s); empty = skip) with `output/` artifacts
 
 ## Setup
 
@@ -24,7 +24,7 @@ Python 3.10+ recommended.
 
 ## Global defaults
 
-Shared paths, source filenames, benchmark ticker, target, and split cuts live in [`config/default.py`](config/default.py).  
+Shared paths, source filenames, benchmark ticker, target, and split cuts live in [`config/config.py`](config/config.py).  
 `config/config_*.py` only keeps family-specific knobs (model types, grids, `STANDARDIZE`, …).
 
 ## Data
@@ -71,7 +71,9 @@ python script/run_feature.py       # build df + descriptive report
 python script/run_preprocess.py    # split + train-only impute / scale
 python script/export_universe.py   # write data/stock_universe.csv (see USE_WRDS in script)
 
-python main.py                     # edit FAMILIES = ("lin",) or ("lin", "tr", "nn")
+python main.py                     # edit MODELS = {family: {model: [features...]}}
+python feat_filter.py              # train-fold feature screen → feat_filter.csv + config_filter.json
+python feat_optuna.py              # per-model feature search → feat_optuna_{trial,best}.csv
 ```
 
 Notebook walkthrough: `notebook/demo.ipynb` (set `FAMILIES` in CONFIG, then run in order). WRDS leverage variant: `notebook/demo_wrds_lev.ipynb`. Kalshi earnings-market scrape: `notebook/kalshi.ipynb`.
@@ -124,21 +126,22 @@ HistGBDT / MLP do not use sklearn’s random `validation_fraction` holdout from 
 | tr     | `config/config_tr.py`  | `decision_tree`, `random_forest`, `hist_gradient_boosting` |
 | nn     | `config/config_nn.py`  | `mlp_shallow`, `mlp`, `mlp_deep`                           |
 
-Select families in `main.py` (`FAMILIES`). Classification (`dir_ann`) is reserved. Shared target / features / cuts: `config/default.py`.
+Select runs in `main.py` (`MODELS`: each model lists one or more feature combinations; `[]` skips). Classification (`dir_ann`) is reserved. Shared target / cuts: `config/config.py`.
 
 ## Metrics and outputs
 
 Definitions: [`docs/metrics.md`](docs/metrics.md) (OOS R², baselines, IC, quintiles, permutation importance).
 
-Terminal blocks: **METRICS**, optional **FEATURE**, **QUINTILES**, then **SUMMARY** (test only; same columns as `metrics.csv`).  
-Artifacts under `output/` (gitignored): `metrics.csv`, `predictions.parquet`, `run_config.json`
+Terminal blocks (`VERBOSE_PRINT=True` in `main.py`): **METRICS**, **QUINTILES** per model; one merged **SUMMARY** at the end. With `VERBOSE_PRINT=False`, only the final metrics table is printed (no SUMMARY banner).  
+Artifacts under `output/` (gitignored): `main_metrics.csv`, optional
+`main_predictions.parquet` (`SAVE_PREDICTIONS` in `main.py`), `config_main.json`
 (all families merged; rows tagged with a `family` column).
 
 ## Layout
 
 ```text
 config/
-  default.py       global data / benchmark / split defaults
+  config.py        global data / benchmark / split defaults
   config_*.py      family-specific model knobs
 model/           estimators
 src/             prepare, sessions, benchmark, macro, analyst, engineered, features, preprocess, metrics, report, pipeline, train

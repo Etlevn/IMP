@@ -2,9 +2,9 @@
 
 Columns that can enter a model. Source tables are in [`dataset.md`](dataset.md). Dates and labels are in [`fields.md`](fields.md).
 
-A group is attached only when its switch in `config/default.py` lists the name (`ANALYST_FEATURES`, `MACRO_FEATURES`, `ENGINEERED_FEATURES`). The original eight are already on the panel. A column is copied onto the event row from the `DecisionDate` close, and a model sees it only when that name is also in `FEATURE_COLUMNS` or in a `main_feat.py` feature set.
+Two layers: implement under `src/features/`, then list the name in `ORIGINAL_FEATURES` / `ANALYST_FEATURES` / `MACRO_FEATURES` / `ENGINEERED_FEATURES` (comment out to disable). `src.features.enabled_features()` concatenates those groups in that order for `feat_filter` / `feat_optuna` / catalog defaults. `feat_filter.py` screens the catalog into a `suggest` column. `feat_optuna.py` builds its pool as `FEATURE_WHITELIST` first, then feat_filter labels enabled by `INCLUDE_SUGGEST`, excluding `FEATURE_BLACKLIST`. `main.py` trains from top-level `MODELS` (family → model → one or more feature lists; empty skips). Optuna selection metric: validation `OBJECTIVE` (`oos_r2` / `rank_ic` / `quintile_ls`).
 
-Attach order on the aligned panel: benchmark, then macro, then derived analyst ratings, then engineered columns. `par*vix` needs `vix` on the panel, so `vix` stays in `MACRO_FEATURES` even when it is not a model input.
+Attach order on the aligned panel: benchmark, then macro, then derived analyst ratings, then engineered columns.
 
 ---
 
@@ -55,7 +55,7 @@ Yahoo daily close, left-merged on `Date` in `src/features/macro.py`. Cached unde
 
 ## Engineered
 
-Built in `src/features/engineered.py` from prices, market cap, the benchmark, and `vix`. Windows use trading days within each `TickerId`. No row uses a later close.
+Built in `src/features/engineered.py` from prices, market cap, and the benchmark. Windows use trading days within each `TickerId`. No row uses a later close.
 
 | Feature | Definition | Note |
 | --- | --- | --- |
@@ -63,6 +63,5 @@ Built in `src/features/engineered.py` from prices, market cap, the benchmark, an
 | `vol_21d` | Sample standard deviation (`ddof=1`) of 21 daily simple returns. | Needs 21 returns; earlier rows are missing. |
 | `log_mcap` | Natural log of `MarketCap`. | Missing when market cap is missing or not positive. |
 | `par_mkt` | Stock return from the close at `AnchorDate−5` to the close at `AnchorDate−2`, minus the benchmark return over that same window. | Stored only on the decision row (`AnchorDate−2`). Same pre-announcement window as the reversal comparison. |
-| `par*vix` | `par_mkt × vix` on that decision row. | Missing unless both factors are finite. The product uses the raw VIX level. |
 
-`par_mkt` uses `BenchmarkAdjClose`. That series is the configured benchmark (`BENCHMARK_SOURCE`: `equal`, `cap`, or Yahoo `MARKET_TICKER`), not a fixed SPY series. The default in `config/default.py` is `equal`.
+`par_mkt` uses `BenchmarkAdjClose`. That series is the configured benchmark (`BENCHMARK_SOURCE`: `equal`, `cap`, or Yahoo `MARKET_TICKER`), not a fixed SPY series. The default in `config/config.py` is `equal`.

@@ -35,6 +35,26 @@ def normalize_benchmark_source(source: str) -> BenchmarkSource:
     return key  # type: ignore[return-value]
 
 
+def normalize_market_ticker(
+    ticker: str | None,
+    *,
+    source: str,
+) -> str | None:
+    """Return a stripped ticker, or ``None`` when empty.
+
+    Empty ``MARKET_TICKER`` is allowed for ``equal`` / ``cap``. Yahoo requires
+    a non-empty ticker.
+    """
+    cleaned = str(ticker).strip() if ticker is not None else ""
+    method = normalize_benchmark_source(source)
+    if method == "yahoo" and not cleaned:
+        raise ValueError(
+            "MARKET_TICKER is required when BENCHMARK_SOURCE == 'yahoo' "
+            "(set a Yahoo symbol such as 'SPY', or switch BENCHMARK_SOURCE)."
+        )
+    return cleaned or None
+
+
 def benchmark_paths(
     folder: Path,
     ticker: str = "SPY",
@@ -213,17 +233,19 @@ def _write_benchmark_cache(
 
 def attach_benchmark(
     frame: pd.DataFrame,
-    ticker: str = "SPY",
+    ticker: str | None = "SPY",
     data_dir: Path | None = None,
     column: str = BENCHMARK_COLUMN,
     source: str = "yahoo",
 ) -> pd.DataFrame:
     folder = DATA_DIR if data_dir is None else data_dir
     method = normalize_benchmark_source(source)
+    resolved = normalize_market_ticker(ticker, source=method)
     dates = pd.to_datetime(frame["Date"]).dt.normalize()
 
     if method == "yahoo":
-        prices = load_benchmark(folder, ticker, dates.min(), dates.max())
+        assert resolved is not None  # enforced by normalize_market_ticker
+        prices = load_benchmark(folder, resolved, dates.min(), dates.max())
     else:
         prices = build_universe_index(frame, method)
         _write_benchmark_cache(folder, prices, source=method)

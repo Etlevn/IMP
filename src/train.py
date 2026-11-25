@@ -47,7 +47,7 @@ class FamilySpec:
     model_types_key: str
     fit_one: FitOneFn
     config_extra_lines: tuple[tuple[str, Any], ...]
-    run_config_extra: dict[str, Any]
+    config_extra: dict[str, Any]
 
 
 def fit_lin(
@@ -263,7 +263,7 @@ def _build_lin_spec() -> FamilySpec:
             ("ALPHA", C.ALPHA),
             ("ALPHA_GRID", tuple(C.ALPHA_GRID)),
         ),
-        run_config_extra={
+        config_extra={
             "ALPHA": C.ALPHA,
             "ALPHA_GRID": list(C.ALPHA_GRID),
         },
@@ -291,7 +291,7 @@ def _build_tr_spec() -> FamilySpec:
             ("MIN_SAMPLES_LEAF", C.MIN_SAMPLES_LEAF),
             ("EARLY_STOPPING_PATIENCE", C.EARLY_STOPPING_PATIENCE),
         ),
-        run_config_extra={
+        config_extra={
             "N_ESTIMATORS": C.N_ESTIMATORS,
             "MAX_DEPTH": C.MAX_DEPTH,
             "MAX_DEPTH_GRID": list(C.MAX_DEPTH_GRID),
@@ -324,7 +324,7 @@ def _build_nn_spec() -> FamilySpec:
             ("MAX_ITER", C.MAX_ITER),
             ("EARLY_STOPPING_PATIENCE", C.EARLY_STOPPING_PATIENCE),
         ),
-        run_config_extra={
+        config_extra={
             "HIDDEN_SIZES": {k: list(v) for k, v in C.HIDDEN_SIZES.items()},
             "ALPHA": C.ALPHA,
             "ALPHA_GRID": list(C.ALPHA_GRID),
@@ -376,7 +376,7 @@ def resolve_demo_setup(
     if ``custom`` is omitted but ``\"custom\"`` is in ``FAMILIES``, a stub is used
     until §5+ replaces it.
     """
-    from config.default import EARNINGS_FILE, SENTIMENT_FILE, STOCK_FILE
+    from config.config import EARNINGS_FILE, SENTIMENT_FILE, STOCK_FILE
 
     blocks: dict[str, Mapping[str, Any]] = {"lin": lin, "tr": tr, "nn": nn}
     if "custom" in families:
@@ -431,8 +431,6 @@ def build_demo_custom_spec(
     block: Mapping[str, Any],
     *,
     fit_one: FitOneFn,
-    feature_importance: bool,
-    feature_importance_repeats: int,
     random_state: int,
 ) -> FamilySpec:
     """Build a demo-only ``FamilySpec`` from a notebook ``fit_one`` (no config_*)."""
@@ -440,8 +438,6 @@ def build_demo_custom_spec(
     if not model_types:
         raise ValueError("custom MODEL_TYPES must be non-empty.")
     cfg = SimpleNamespace(
-        FEATURE_IMPORTANCE=bool(feature_importance),
-        FEATURE_IMPORTANCE_REPEATS=int(feature_importance_repeats),
         RANDOM_STATE=int(random_state),
         STANDARDIZE=bool(block["STANDARDIZE"]),
         MODEL_LABEL="demo_custom",
@@ -458,7 +454,7 @@ def build_demo_custom_spec(
         model_types_key="MODEL_TYPES",
         fit_one=fit_one,
         config_extra_lines=(("MODEL_TYPES", model_types),) + extras,
-        run_config_extra={k: v for k, v in block.items() if k != "MODEL_TYPES"},
+        config_extra={k: v for k, v in block.items() if k != "MODEL_TYPES"},
     )
 
 
@@ -466,8 +462,6 @@ def apply_demo_block(
     family: FamilyName,
     block: dict[str, Any],
     *,
-    feature_importance: bool,
-    feature_importance_repeats: int,
     random_state: int,
 ) -> FamilySpec:
     """Write a demo family dict into ``config.config_*`` and return a fresh spec."""
@@ -504,7 +498,5 @@ def apply_demo_block(
     else:
         raise ValueError(f"Unknown family {family!r}.")
 
-    C.FEATURE_IMPORTANCE = bool(feature_importance)
-    C.FEATURE_IMPORTANCE_REPEATS = int(feature_importance_repeats)
     C.RANDOM_STATE = int(random_state)
     return get_family_spec(family)

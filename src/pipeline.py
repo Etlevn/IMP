@@ -13,16 +13,17 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
+from config.config import EARNINGS_FILE, SENTIMENT_FILE, STOCK_FILE
 from src.events import build_event_table
 from src.metrics import (
     infer_task,
     metrics_table,
-    permutation_importance_regression,
     print_model_fit_report,
     order_summary_table,
     print_summary_table,
     quintile_table,
     summary_row_from_fold_metrics,
+    train_quintile_long_short,
 )
 from src.prepare import load_earnings, load_sentiment, load_stock, merge_panel, sticky_model_bar
 from src.preprocess import PreprocessResult, run_preprocess
@@ -47,9 +48,7 @@ BANNER = "=" * 120
 def print_banner(title: str) -> None:
     print()
     print(BANNER)
-    print()
     print(title.upper())
-    print()
     print(BANNER)
 
 
@@ -91,17 +90,28 @@ def save_run_artifacts(
     *,
     output_dir: Path,
     metrics: pd.DataFrame,
-    predictions: pd.DataFrame,
-    run_config: dict,
+    predictions: pd.DataFrame | None = None,
+    config: dict | None = None,
+    config_filename: str = "config.json",
+    metrics_filename: str = "main_metrics.csv",
+    predictions_filename: str = "main_predictions.parquet",
+    save_predictions: bool = True,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    metrics.to_csv(output_dir / "metrics.csv", index=False)
-    predictions.to_parquet(output_dir / "predictions.parquet", index=False)
-    stale = output_dir / "quintiles.csv"
-    if stale.exists():
-        stale.unlink()
-    with (output_dir / "run_config.json").open("w", encoding="utf-8") as handle:
-        json.dump(run_config, handle, indent=2, default=str)
+    metrics.to_csv(output_dir / metrics_filename, index=False, float_format="%.4f")
+    if save_predictions:
+        if predictions is None:
+            raise ValueError("predictions is required when save_predictions=True.")
+        predictions.to_parquet(
+            output_dir / predictions_filename, index=False
+        )
+    for stale_name in ("quintiles.csv", "metrics.csv", "predictions.parquet"):
+        stale = output_dir / stale_name
+        if stale.exists():
+            stale.unlink()
+    if config is not None:
+        with (output_dir / config_filename).open("w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=2, default=str)
 
 
 def print_family_config(
@@ -130,8 +140,6 @@ def print_family_config(
     print(f"IMPUTE_STRATEGY   {spec.config.IMPUTE_STRATEGY}")
     print(f"STANDARDIZE       {spec.config.STANDARDIZE}")
     print(f"RANDOM_STATE      {spec.config.RANDOM_STATE}")
-    print(f"FEATURE_IMPORTANCE {spec.config.FEATURE_IMPORTANCE}")
-    print(f"FEATURE_IMPORTANCE_REPEATS {spec.config.FEATURE_IMPORTANCE_REPEATS}")
 
 
 def _json_number(value: object) -> float | None:
@@ -173,7 +181,7 @@ def model_fit_record(
     fold_metrics: pd.DataFrame,
     random_state: int,
 ) -> dict[str, object]:
-    """Per-model fit facts stored in ``run_config.json`` and not in metrics.csv."""
+    """Per-model fit facts kept on the in-memory run config, not in metrics.csv."""
     val_oos_r2, val_rmse = _selected_val_scores(bundle, fold_metrics)
     selected_alpha = None
     selected_max_depth = None
@@ -206,8 +214,12 @@ def run_one_model(
     result: PreprocessResult,
     train_y_mean: float,
     task: str,
+    quiet: bool = False,
 ) -> tuple[dict[str, float | int | str], pd.DataFrame, dict[str, object]]:
-    """Fit one model via the family adapter, then shared metrics / report."""
+    """Fit one model via the family adapter, then shared metrics / report.
+
+    ``quiet=True`` skips the terminal fit report (used by feature-search trials).
+    """
     bundle = spec.fit_one(model_type, result)
     cfg = spec.config
 
@@ -218,38 +230,37 @@ def run_one_model(
         fold_predictions, task=task, train_y_mean=train_y_mean
     )
 
-    importance = None
-    if cfg.FEATURE_IMPORTANCE:
-        test = result.folds["test"]
-        importance = permutation_importance_regression(
-            bundle.predict,
-            test.X,
-            test.y,
-            n_repeats=cfg.FEATURE_IMPORTANCE_REPEATS,
-            random_state=cfg.RANDOM_STATE,
-            train_y_mean=train_y_mean,
-        )
-
     predictions = build_predictions(
         result, model_type=model_type, predict=bundle.predict
     )
-    quintiles = quintile_table(predictions)
-    print_model_fit_report(
-        model_type,
-        fold_metrics=fold_metrics,
-        quintiles=quintiles,
-        tuning=bundle.tuning,
-        selected=bundle.selected,
-        tuning_label=bundle.tuning_label,
-        best_iteration=bundle.best_iteration,
-        max_iter=bundle.max_iter,
-        importance=importance,
-    )
+    if not quiet:
+        quintiles = quintile_table(predictions)
+        print_model_fit_report(
+            model_type,
+            fold_metrics=fold_metrics,
+            quintiles=quintiles,
+            tuning=bundle.tuning,
+            selected=bundle.selected,
+            tuning_label=bundle.tuning_label,
+            best_iteration=bundle.best_iteration,
+            max_iter=bundle.max_iter,
+        )
     summary = summary_row_from_fold_metrics(
         model_type,
         fold_metrics,
         predictions=predictions,
     )
+    # Attach val scores for search entrypoints (not written to metrics.csv SUMMARY).
+    if "val" in fold_metrics.index:
+        summary = {
+            **summary,
+            "n_val": int(fold_metrics.loc["val", "n"]),
+            "val_oos_r2": float(fold_metrics.loc["val", "oos_r2"]),
+            "val_rank_ic": float(fold_metrics.loc["val", "rank_ic"]),
+            "val_quintile_ls": float(
+                train_quintile_long_short(predictions, test_fold="val")
+            ),
+        }
     record = model_fit_record(
         model_type,
         bundle,
@@ -257,6 +268,70 @@ def run_one_model(
         random_state=int(cfg.RANDOM_STATE),
     )
     return summary, predictions, record
+
+
+def score_feature_subset(
+    spec: FamilySpec,
+    *,
+    model_type: str,
+    feature_columns: Sequence[str],
+    events: pd.DataFrame,
+    preprocess_cache: dict[tuple[frozenset[str], str], PreprocessResult] | None = None,
+) -> tuple[dict[str, float | int | str], dict[str, object]]:
+    """Fit one model on a column subset; return ``(summary, fit_record)``.
+
+    ``summary`` includes test SUMMARY fields plus ``n_val`` / ``val_oos_r2`` /
+    ``val_rank_ic`` / ``val_quintile_ls``. Preprocess results are cached by
+    ``(frozenset(columns), family)`` when a cache dict is provided.
+    """
+    columns = list(feature_columns)
+    if not columns:
+        raise ValueError("feature_columns must be non-empty.")
+    cfg = spec.config
+    family = str(spec.name)
+    cache_key = (frozenset(columns), family)
+    if preprocess_cache is not None and cache_key in preprocess_cache:
+        result = preprocess_cache[cache_key]
+    else:
+        missing = [name for name in columns if name not in events.columns]
+        if missing:
+            raise KeyError(
+                "Feature columns missing from the event table: "
+                f"{missing}. Attach them before build_event_table."
+            )
+        result = run_preprocess(
+            events,
+            target=cfg.TARGET,
+            feature_columns=columns,
+            split_column=cfg.SPLIT_COLUMN,
+            train_end=cfg.TRAIN_END,
+            val_end=cfg.VAL_END,
+            impute_strategy=cfg.IMPUTE_STRATEGY,
+            standardize=cfg.STANDARDIZE,
+        )
+        if "val" not in result.folds or "test" not in result.folds:
+            raise RuntimeError(
+                "Expected train/val/test folds; check TRAIN_END / VAL_END in config."
+            )
+        if preprocess_cache is not None:
+            preprocess_cache[cache_key] = result
+
+    task = infer_task(cfg.TARGET)
+    if task != "regression":
+        raise NotImplementedError(
+            "Classification metrics are not implemented yet; "
+            f"use a regression TARGET (got TARGET={cfg.TARGET!r})."
+        )
+    train_y_mean = float(np.asarray(result.folds["train"].y, dtype=float).mean())
+    summary, _predictions, record = run_one_model(
+        spec,
+        model_type=model_type,
+        result=result,
+        train_y_mean=train_y_mean,
+        task=task,
+        quiet=True,
+    )
+    return summary, record
 
 
 def _show_model(progress: tqdm | None, model_type: str, group: str | None) -> None:
@@ -274,13 +349,20 @@ def run_family(
     events: pd.DataFrame | None = None,
     progress: tqdm | None = None,
     progress_group: str | None = None,
+    print_config: bool = True,
+    print_summary: bool = True,
+    quiet: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Full batch run for one model family (config → data → fit).
 
-    ``feature_columns`` overrides ``config.FEATURE_COLUMNS`` for this call.
+    ``feature_columns`` overrides the family config catalog for this call.
     ``events`` skips the panel load when the event table is already built.
-    Returns ``(metrics, predictions, run_config)`` with a leading ``family``
-    column on the frames. Does not write artifacts; callers merge and save.
+    ``print_config=False`` skips the verbose CONFIG block (callers may print
+    a shorter summary). ``print_summary=False`` skips the per-call SUMMARY
+    block so batch entrypoints can print one merged table at the end.
+    ``quiet=True`` skips per-model METRICS / QUINTILES reports.
+    Returns ``(metrics, predictions, config)`` with a leading ``family``
+    column on the frames. Does not write artifacts.
     """
     cfg = spec.config
     family = str(spec.name)
@@ -291,7 +373,8 @@ def run_family(
     if not model_types:
         raise ValueError(f"{spec.model_types_key} must be non-empty.")
     _show_model(progress, model_types[0], progress_group)
-    print_family_config(spec, columns)
+    if print_config:
+        print_family_config(spec, columns)
 
     task = infer_task(cfg.TARGET)
     if task != "regression":
@@ -349,6 +432,7 @@ def run_family(
             result=result,
             train_y_mean=train_y_mean,
             task=task,
+            quiet=quiet,
         )
         summary_rows.append(summary)
         prediction_blocks.append(predictions)
@@ -360,18 +444,19 @@ def run_family(
     metrics.insert(0, "family", family)
     predictions_all = pd.concat(prediction_blocks, axis=0).reset_index(drop=True)
     predictions_all.insert(0, "family", family)
-    print_banner("SUMMARY")
-    print_summary_table(metrics)
+    if print_summary:
+        print_banner("SUMMARY")
+        print_summary_table(metrics)
 
-    run_config = {
+    config = {
         "family": family,
         "MODEL_LABEL": cfg.MODEL_LABEL,
         spec.model_types_key: list(model_types),
-        **spec.run_config_extra,
+        **spec.config_extra,
         "TARGET": cfg.TARGET,
         "BENCHMARK_SOURCE": cfg.BENCHMARK_SOURCE,
         "MARKET_TICKER": cfg.MARKET_TICKER,
-        "DATA_ROOT": str(cfg.DATA_ROOT),
+        "DATA_FILES": [STOCK_FILE, EARNINGS_FILE, SENTIMENT_FILE],
         "FEATURE_COLUMNS": columns,
         "SPLIT_COLUMN": cfg.SPLIT_COLUMN,
         "TRAIN_END": cfg.TRAIN_END,
@@ -385,15 +470,16 @@ def run_family(
         "folds": fold_date_range(result, cfg.SPLIT_COLUMN),
         "fits": fits,
     }
-    return metrics, predictions_all, run_config
+    return metrics, predictions_all, config
 
 
 def run_family_by_name(family: FamilyName | Sequence[FamilyName]) -> None:
     """Run one or more families sequentially (``main.py``).
 
-    Each family keeps its own preprocess (``STANDARDIZE``) and SUMMARY print.
-    Artifacts are merged and written once under ``output/``:
-    ``metrics.csv``, ``predictions.parquet``, ``run_config.json``.
+    Each family keeps its own preprocess (``STANDARDIZE``). One merged
+    SUMMARY prints after all families finish. Artifacts are written once
+    under ``output/``: ``main_metrics.csv``, ``main_predictions.parquet``
+    (no config file; use ``main.py``).
     """
     if isinstance(family, str):
         families: tuple[FamilyName, ...] = (family,)
@@ -410,26 +496,25 @@ def run_family_by_name(family: FamilyName | Sequence[FamilyName]) -> None:
 
     metrics_blocks: list[pd.DataFrame] = []
     prediction_blocks: list[pd.DataFrame] = []
-    family_configs: dict[str, dict] = {}
     specs = [get_family_spec(name) for name in families]
     output_dir = Path(specs[0].config.OUTPUT_DIR)
 
     with sticky_model_bar(sum(len(spec.model_types) for spec in specs)) as progress:
         for spec in specs:
-            metrics, predictions, run_config = run_family(spec, progress=progress)
+            metrics, predictions, _config = run_family(
+                spec,
+                progress=progress,
+                print_summary=False,
+            )
             metrics_blocks.append(metrics)
             prediction_blocks.append(predictions)
-            family_configs[str(spec.name)] = run_config
 
     metrics_all = pd.concat(metrics_blocks, axis=0, ignore_index=True)
     predictions_all = pd.concat(prediction_blocks, axis=0, ignore_index=True)
-    run_config_all = {
-        "families": list(families),
-        "by_family": family_configs,
-    }
+    print_banner("SUMMARY")
+    print_summary_table(metrics_all)
     save_run_artifacts(
         output_dir=output_dir,
         metrics=metrics_all,
         predictions=predictions_all,
-        run_config=run_config_all,
     )
