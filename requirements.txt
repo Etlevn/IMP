@@ -1,8 +1,0 @@
-pandas
-pyarrow
-numpy
-tqdm
-scikit-learn
-exchange_calendars
-yfinance
-ipywidgets

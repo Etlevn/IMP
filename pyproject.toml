@@ -1,0 +1,25 @@
+[project]
+name = "imp"
+version = "0.1.0"
+description = "Identifying Market Positioning Ahead of Earnings"
+readme = "README.md"
+# CPython 3.15 currently segfaults in pandas datetime / parquet timestamp paths.
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "pandas",
+    "pyarrow",
+    "numpy",
+    "tqdm",
+    "scikit-learn",
+    "exchange_calendars",
+    "yfinance",
+    "ipywidgets",
+    "wrds",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []

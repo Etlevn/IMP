@@ -17,7 +17,7 @@ Predict post-earnings stock behavior from information available **before** the a
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Python 3.10+ recommended.
@@ -50,7 +50,7 @@ Sample panel used in development: on the order of **~200 U.S. names** with price
 
 ### Stock universe CSV
 
-`data/stock_universe.csv` is a local download list (one row per `TickerId`) for WRDS / other external pulls: identifiers plus price-panel date coverage. Regenerate with `python script/export_universe.py`.
+`data/stock_universe.csv` is a local download list (one row per `TickerId`) for WRDS / other external pulls: identifiers plus price-panel date coverage, with optional CRSP `permno` and Compustat `gvkey` looked up on WRDS. Regenerate with `python script/export_universe.py` (toggle `USE_WRDS` / `WRDS_USERNAME` at the top of that script).
 
 | Column | Notes |
 | ------ | ----- |
@@ -58,6 +58,8 @@ Sample panel used in development: on the order of **~200 U.S. names** with price
 | `Symbol`, `Exchange` | Split from `ShortName` (e.g. `ABNB` / `XNGS`) |
 | `InstrumentName` | Company name for manual checks |
 | `price_start`, `price_end` | Suggested download window |
+| `permno` | CRSP id whose ticker (`crsp.stocknames`) was active during the price window |
+| `gvkey` | Compustat id via the CCM link table (LU/LC, primary links); read as a string to keep leading zeros. Blank for non-U.S. listings (e.g. XTSE) |
 
 Same `Symbol` may appear on more than one row; keep those rows when mapping vendor ids.
 
@@ -67,7 +69,7 @@ Same `Symbol` may appear on more than one row; keep those rows when mapping vend
 python script/run_data.py          # preview df_all
 python script/run_feature.py       # build df + descriptive report
 python script/run_preprocess.py    # split + train-only impute / scale
-python script/export_universe.py   # write data/stock_universe.csv
+python script/export_universe.py   # write data/stock_universe.csv (see USE_WRDS in script)
 
 python main.py                     # edit FAMILIES = ("lin",) or ("lin", "tr", "nn")
 ```
