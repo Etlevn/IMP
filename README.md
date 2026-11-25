@@ -74,7 +74,7 @@ python script/export_universe.py   # write data/stock_universe.csv (see USE_WRDS
 python main.py                     # edit FAMILIES = ("lin",) or ("lin", "tr", "nn")
 ```
 
-Notebook walkthrough: `notebook/demo.ipynb` (set `FAMILIES` in CONFIG, then run in order).
+Notebook walkthrough: `notebook/demo.ipynb` (set `FAMILIES` in CONFIG, then run in order). Kalshi earnings-market scrape: `notebook/kalshi.ipynb`.
 
 ## Pipeline
 
@@ -144,7 +144,7 @@ model/           estimators
 src/             prepare, sessions, benchmark, macro, analyst, engineered, features, preprocess, metrics, report, pipeline, train
 script/          run_data / run_feature / run_preprocess / export_universe
 docs/            dataset.md, fields.md, features.md, metrics.md, expand.md
-notebook/        demo.ipynb
+notebook/        demo.ipynb, kalshi.ipynb
 main.py
 data/            local Parquet and caches (gitignored)
 output/          run artifacts (gitignored)
