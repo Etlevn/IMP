@@ -31,7 +31,7 @@ Daily equity panel (prices, volume, market cap, and long-horizon QScore features
 | `High`            | Session high price.                                                                                     |
 | `Low`             | Session low price.                                                                                      |
 | `Volume`          | Traded share volume for the session.                                                                    |
-| `CurrencyId`      | Currency for prices: almost all rows are `840` (USD); a small CAD book exists (`124`, e.g. `ARE:XTSE`). |
+| `CurrencyId`      | Currency for prices: raw file is almost all `840` (USD) plus a small CAD book (`124`, e.g. `ARE:XTSE`); `load_stock` keeps USD rows only. |
 | `QScoreTrendLong` | Long-horizon trend technical score.                                                                     |
 | `QScoreSpeedLong` | Long-horizon speed / momentum technical score.                                                          |
 | `QScoreLong`      | Equals `QScoreTrendLong + QScoreSpeedLong` on observed rows (redundant if all three are model inputs).  |

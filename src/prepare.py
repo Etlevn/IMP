@@ -24,6 +24,7 @@ from config.default import (
 ROOT = Path(__file__).resolve().parents[1]
 
 _CHUNK = 50_000
+USD_CURRENCY_ID = 840
 # Transient row bars sit above this many pinned footer bars.
 _ROW_POS = 0
 
@@ -100,7 +101,8 @@ def _read_parquet(path: Path) -> pd.DataFrame:
 
 def load_stock(data_dir: Path | None = None) -> pd.DataFrame:
     folder = DATA_DIR if data_dir is None else data_dir
-    return _read_parquet(folder / STOCK_FILE)
+    stock = _read_parquet(folder / STOCK_FILE)
+    return stock[stock["CurrencyId"] == USD_CURRENCY_ID].reset_index(drop=True)
 
 
 def load_earnings(data_dir: Path | None = None) -> pd.DataFrame:
