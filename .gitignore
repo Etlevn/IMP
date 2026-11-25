@@ -4,7 +4,12 @@
 _*/
 notes/
 output/
-data/
+# Team branches may track panel/cache artifacts; keep junk out.
+data/*
+!data/.gitkeep
+!data/*.parquet
+!data/*.json
+!data/*.csv
 __pycache__/
 *.py[cod]
 docs/superpowers/
