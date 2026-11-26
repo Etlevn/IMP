@@ -178,6 +178,29 @@ def _clone_booster_with_rounds(model: Any, n_rounds: int) -> Any:
     return probe
 
 
+def _booster_predict_at_iteration(
+    model: Any, X: np.ndarray, n_iter: int
+) -> np.ndarray:
+    """Predict using only the first ``n_iter`` trees of a fitted booster."""
+    name = type(model).__name__.lower()
+    n_iter = max(1, int(n_iter))
+    if "lgbm" in name:
+        return np.asarray(
+            model.predict(X, num_iteration=n_iter), dtype=float
+        )
+    if "xgb" in name:
+        return np.asarray(
+            model.predict(X, iteration_range=(0, n_iter)), dtype=float
+        )
+    if "catboost" in name:
+        return np.asarray(
+            model.predict(X, ntree_end=n_iter), dtype=float
+        )
+    raise TypeError(
+        f"Staged prediction not supported for {type(model).__name__}."
+    )
+
+
 def _fit_hgb_on_chronological_val(
     *,
     max_depth: int,
@@ -257,22 +280,27 @@ def _fit_external_booster_on_val(
     train_y_mean: float,
     objective: str = "oos_r2",
 ) -> tuple[Any, int]:
-    """Fit LGBM / XGB / CatBoost; early-stop on chronological val OBJECTIVE."""
+    """Fit LGBM / XGB / CatBoost once; pick best iter via staged val OBJECTIVE.
+
+    Trains the full ``max_rounds`` booster once, scores prefixes with
+    library staged-predict APIs, then refits at ``best_iter`` when needed
+    (at most two full fits total — never O(N^2) restarts).
+    """
     objective = normalize_tuning_objective(objective)
     max_rounds = max(1, _booster_max_rounds(model))
+    full = _clone_booster_with_rounds(model, max_rounds)
+    full.fit(X_train, y_train)
+
     best_iter = 1
     best_metric = float("-inf")
     best_rmse = float("inf")
-    best_model: Any | None = None
     stale = 0
     for n_iter in range(1, max_rounds + 1):
-        probe = _clone_booster_with_rounds(model, n_iter)
-        probe.fit(X_train, y_train)
         metrics = regression_tuning_metrics(
             y_train,
-            np.asarray(probe.predict(X_train), dtype=float),
+            _booster_predict_at_iteration(full, X_train, n_iter),
             y_val,
-            np.asarray(probe.predict(X_val), dtype=float),
+            _booster_predict_at_iteration(full, X_val, n_iter),
             train_y_mean=train_y_mean,
         )
         if is_tuning_improvement(
@@ -284,15 +312,16 @@ def _fit_external_booster_on_val(
             best_iter = n_iter
             best_metric = tuning_metric_value(metrics, objective)
             best_rmse = float(metrics["val_rmse"])
-            best_model = probe
             stale = 0
         else:
             stale += 1
             if stale >= int(early_stopping_patience):
                 break
-    if best_model is None:
-        best_model = _clone_booster_with_rounds(model, best_iter)
-        best_model.fit(X_train, y_train)
+
+    if int(best_iter) == int(max_rounds):
+        return full, int(best_iter)
+    best_model = _clone_booster_with_rounds(model, best_iter)
+    best_model.fit(X_train, y_train)
     return best_model, int(best_iter)
 
 
