@@ -1,6 +1,7 @@
-"""Download IBES features from WRDS into data/ibes_features.parquet (+ .json).
+"""Download IBES features from WRDS into data/ibes_features.* (+ ibes_sue_features.*).
 
-Attach paths only read the cache (no WRDS in main / feat_filter).
+STATPERS consensus → ``ibes_features``; quarterly SUE/beat → ``ibes_sue_features``
+(asof = available_on). Attach paths only read the caches (no WRDS in main / feat_filter).
 
 Usage (from repo root):
     python script/export_universe.py   # need permno
@@ -38,9 +39,11 @@ def main() -> None:
         ibes_features=list(IBES_FEATURES),
         username=WRDS_USERNAME,
     )
-    path, meta_path = cache_paths(DATA_DIR, "ibes")
-    print(f"[WROTE] {path}")
-    print(f"[WROTE] {meta_path}")
+    for stem in ("ibes", "ibes_sue"):
+        path, meta_path = cache_paths(DATA_DIR, stem)
+        if path.exists():
+            print(f"[WROTE] {path}")
+            print(f"[WROTE] {meta_path}")
 
 
 if __name__ == "__main__":

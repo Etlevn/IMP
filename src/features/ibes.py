@@ -34,7 +34,19 @@ ALL_IBES = (
     "days_since_est_update",
 )
 
-QUERY_FINGERPRINT = "ibes.statsum_epsus|qtr_fpi6+ltg|v2"
+# Quarterly surprise features: as-of on available_on (not STATPERS).
+EVENT_FEATURES = ("sue_lag1", "sue_lag2", "beat_rate_4q")
+STEM_SNAP = "ibes"
+STEM_SUE = "ibes_sue"
+
+QUERY_FINGERPRINT = "ibes.statsum_epsus|qtr_fpi6+ltg|v8_sue_direct_asof"
+
+
+def split_ibes_features(wanted: list[str]) -> tuple[list[str], list[str]]:
+    """Split into STATPERS snapshot features vs event (SUE/beat) features."""
+    snap = [f for f in wanted if f not in EVENT_FEATURES]
+    event = [f for f in wanted if f in EVENT_FEATURES]
+    return snap, event
 
 
 def _connect_username() -> str | None:
@@ -45,13 +57,205 @@ def _connect_username() -> str | None:
     return WRDS_USERNAME
 
 
+def actual_pit_series(
+    actual: pd.Series,
+    anndats_act: pd.Series,
+    statpers: pd.Series,
+) -> pd.Series:
+    """Point-in-time actual: only if announcement date is known and ≤ STATPERS.
+
+    WRDS often backfills ``actual`` onto pre-announcement STATPERS rows; without
+    this mask, SUE / beat would use non-public EPS at ``asof_date = statpers``.
+    """
+    act = pd.to_numeric(actual, errors="coerce")
+    ann = pd.to_datetime(anndats_act, errors="coerce").dt.normalize()
+    sp = pd.to_datetime(statpers, errors="coerce").dt.normalize()
+    return act.where(ann.notna() & (ann <= sp))
+
+
+def build_quarter_earnings_events(mapped: pd.DataFrame) -> pd.DataFrame:
+    """One row per ``(TickerId, fpedats)`` earnings event with SUE / beat.
+
+    Consensus / stdev taken from the last STATPERS with ``statpers < anndats_act``
+    (strictly before announcement when no intraday timestamp is available).
+    Panel availability is ``available_on = anndats_act + 1`` calendar day.
+    Requires: ``TickerId``, ``statpers``, ``fpedats``, ``actual``, ``anndats_act``,
+    ``eps_consensus``, ``stdev``.
+    """
+    need = [
+        "TickerId",
+        "statpers",
+        "fpedats",
+        "actual",
+        "anndats_act",
+        "eps_consensus",
+        "stdev",
+    ]
+    missing = [c for c in need if c not in mapped.columns]
+    if missing:
+        raise ValueError(f"build_quarter_earnings_events missing columns: {missing}")
+
+    rows: list[dict[str, object]] = []
+    base = mapped.loc[:, need].copy()
+    base["statpers"] = pd.to_datetime(base["statpers"]).dt.normalize()
+    base["fpedats"] = pd.to_datetime(base["fpedats"], errors="coerce").dt.normalize()
+    base["anndats_act"] = pd.to_datetime(
+        base["anndats_act"], errors="coerce"
+    ).dt.normalize()
+    base["actual"] = pd.to_numeric(base["actual"], errors="coerce")
+    base["eps_consensus"] = pd.to_numeric(base["eps_consensus"], errors="coerce")
+    base["stdev"] = pd.to_numeric(base["stdev"], errors="coerce")
+    base = base.dropna(subset=["TickerId", "fpedats"])
+
+    for (ticker_id, fpedats), grp in base.groupby(["TickerId", "fpedats"], sort=False):
+        ann = grp["anndats_act"].dropna()
+        act = grp["actual"].dropna()
+        if ann.empty or act.empty:
+            continue
+        anndats_act = ann.iloc[0]
+        actual = float(act.iloc[0])
+        pre = grp.loc[grp["statpers"] < anndats_act].sort_values("statpers")
+        if pre.empty:
+            continue
+        last = pre.iloc[-1]
+        consensus = last["eps_consensus"]
+        stdev = last["stdev"]
+        if pd.isna(consensus) or pd.isna(stdev) or float(stdev) == 0.0:
+            sue = np.nan
+        else:
+            sue = (actual - float(consensus)) / float(stdev)
+        if pd.isna(consensus):
+            beat = np.nan
+        else:
+            beat = float(actual > float(consensus))
+        rows.append(
+            {
+                "TickerId": ticker_id,
+                "fpedats": fpedats,
+                "anndats_act": anndats_act,
+                # No intraday timestamp: features become usable the next calendar day.
+                "available_on": pd.Timestamp(anndats_act) + pd.DateOffset(days=1),
+                "_sue": sue,
+                "_beat": beat,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "TickerId",
+                "fpedats",
+                "anndats_act",
+                "available_on",
+                "sue_lag1",
+                "sue_lag2",
+                "beat_rate_4q",
+            ]
+        )
+
+    events = pd.DataFrame(rows)
+    events = events.sort_values(["TickerId", "anndats_act"]).reset_index(drop=True)
+    g = events.groupby("TickerId", sort=False)
+    # lag1 = most recently announced SUE; lag2 = prior announced SUE.
+    # (Do not shift before as-of: that made features one quarter too stale.)
+    events["sue_lag1"] = events["_sue"]
+    events["sue_lag2"] = g["_sue"].shift(1)
+    events["beat_rate_4q"] = g["_beat"].transform(
+        lambda s: s.rolling(4, min_periods=1).mean()
+    )
+    return events.loc[
+        :,
+        [
+            "TickerId",
+            "fpedats",
+            "anndats_act",
+            "available_on",
+            "sue_lag1",
+            "sue_lag2",
+            "beat_rate_4q",
+        ],
+    ]
+
+
+def attach_quarter_event_features(
+    panel: pd.DataFrame, events: pd.DataFrame
+) -> pd.DataFrame:
+    """Backward as-of attach of event ``sue_lag*`` / ``beat_rate_4q`` onto panel.
+
+    Uses ``available_on`` (= ``anndats_act + 1`` calendar day) so announcement-day
+    STATPERS rows do not see the new SUE/beat. Requires panel ``TickerId``,
+    ``statpers``. Mutates and returns ``panel``.
+    """
+    feat_cols = ["sue_lag1", "sue_lag2", "beat_rate_4q"]
+    for col in feat_cols:
+        panel[col] = np.nan
+    if events is None or events.empty:
+        return panel
+
+    left = panel.loc[:, ["TickerId", "statpers"]].copy()
+    left["_row"] = np.arange(len(panel))
+    left["TickerId"] = pd.to_numeric(left["TickerId"], errors="coerce")
+    left["statpers"] = pd.to_datetime(left["statpers"], errors="coerce").dt.normalize()
+    left = left.dropna(subset=["TickerId", "statpers"])
+
+    right = events.loc[:, ["TickerId", "available_on", *feat_cols]].copy()
+    right["TickerId"] = pd.to_numeric(right["TickerId"], errors="coerce")
+    right["available_on"] = pd.to_datetime(
+        right["available_on"], errors="coerce"
+    ).dt.normalize()
+    right = right.dropna(subset=["TickerId", "available_on"])
+    right = right.sort_values(["TickerId", "available_on"], kind="mergesort")
+
+    pieces: list[pd.DataFrame] = []
+    right_groups = {tid: g for tid, g in right.groupby("TickerId", sort=False)}
+    for tid, left_g in left.groupby("TickerId", sort=False):
+        left_g = left_g.sort_values("statpers", kind="mergesort")
+        right_g = right_groups.get(tid)
+        if right_g is None or right_g.empty:
+            continue
+        pieces.append(
+            pd.merge_asof(
+                left_g,
+                right_g.drop(columns=["TickerId"]),
+                left_on="statpers",
+                right_on="available_on",
+                direction="backward",
+            )
+        )
+    if not pieces:
+        return panel
+
+    merged = pd.concat(pieces, ignore_index=True).sort_values("_row")
+    idx = merged["_row"].to_numpy(dtype=int)
+    for col in feat_cols:
+        vals = np.full(len(panel), np.nan, dtype=float)
+        vals[idx] = merged[col].to_numpy(dtype=float)
+        panel[col] = vals
+    return panel
+
+
+def add_actual_derived_features(mapped: pd.DataFrame) -> pd.DataFrame:
+    """Build quarter events from ``mapped`` snapshots and attach onto the same frame.
+
+    Prefer building events from ``(TickerId, fpedats, statpers)`` snapshots, then
+    calling ``attach_quarter_event_features`` on the panel grain.
+    """
+    events = build_quarter_earnings_events(mapped)
+    return attach_quarter_event_features(mapped, events)
+
+
 def _download_ibes_frame(
     folder: Path,
     start: pd.Timestamp,
     end: pd.Timestamp,
     *,
     username: str | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return ``(statpers_panel, sue_event_panel)``.
+
+    Snapshot panel uses ``asof_date = statpers`` (consensus / revisions).
+    Event panel uses ``asof_date = available_on`` for direct daily as-of of SUE/beat.
+    """
     universe = load_universe(folder)
     if "Symbol" not in universe.columns:
         raise ValueError("stock_universe.csv needs Symbol for IBES ticker matching.")
@@ -75,7 +279,7 @@ def _download_ibes_frame(
         # that column does not exist; CRSP uses ticker / namedt / nameenddt).
         stats = db.raw_sql(
             f"""
-            SELECT ticker, oftic, measure, fiscalp, fpi, statpers,
+            SELECT ticker, oftic, measure, fiscalp, fpi, statpers, fpedats,
                    numest, medest, meanest, stdev, actual, anndats_act
             FROM ibes.statsum_epsus
             WHERE measure = 'EPS'
@@ -114,6 +318,10 @@ def _download_ibes_frame(
 
     stats = stats.copy()
     stats["statpers"] = pd.to_datetime(stats["statpers"]).dt.normalize()
+    stats["fpedats"] = pd.to_datetime(stats["fpedats"], errors="coerce").dt.normalize()
+    stats["anndats_act"] = pd.to_datetime(
+        stats["anndats_act"], errors="coerce"
+    ).dt.normalize()
     for col in ("medest", "meanest", "stdev", "numest", "actual"):
         if col in stats.columns:
             stats[col] = pd.to_numeric(stats[col], errors="coerce")
@@ -133,43 +341,40 @@ def _download_ibes_frame(
             "IBES rows could not be linked to TickerId via Symbol↔oftic/ticker."
         )
 
-    mapped = mapped.sort_values(["TickerId", "statpers"]).drop_duplicates(
+    # Keep one forecast snapshot per fiscal period × STATPERS for event SUE.
+    snapshots = mapped.sort_values(
+        ["TickerId", "fpedats", "statpers"]
+    ).drop_duplicates(subset=["TickerId", "fpedats", "statpers"], keep="last")
+
+    snapshots["eps_consensus"] = snapshots["medest"].where(
+        snapshots["medest"].notna(), snapshots["meanest"]
+    )
+    snapshots["eps_dispersion"] = snapshots["stdev"]
+    snapshots["eps_coverage"] = snapshots["numest"]
+
+    events = build_quarter_earnings_events(snapshots)
+
+    # Panel grain for cache / as-of attach: one row per TickerId × STATPERS.
+    panel = snapshots.sort_values(["TickerId", "statpers"]).drop_duplicates(
         subset=["TickerId", "statpers"], keep="last"
     )
-
-    # Consensus level features on each STATPERS.
-    mapped["eps_consensus"] = mapped["medest"].where(
-        mapped["medest"].notna(), mapped["meanest"]
-    )
-    mapped["eps_dispersion"] = mapped["stdev"]
-    mapped["eps_coverage"] = mapped["numest"]
     # Filled at attach time as (Date - AsOfDate).days; placeholder in cache.
-    mapped["days_since_est_update"] = np.nan
+    panel["days_since_est_update"] = np.nan
 
-    # Revisions vs prior STATPERS for same ticker.
-    g = mapped.groupby("TickerId", sort=False)
-    mapped["eps_revision_1m"] = mapped["eps_consensus"] - g["eps_consensus"].shift(1)
-    mapped["eps_revision_3m"] = mapped["eps_consensus"] - g["eps_consensus"].shift(3)
-    mapped["eps_consensus_chg_std"] = g["eps_consensus"].transform(
+    g = panel.groupby("TickerId", sort=False)
+    panel["eps_revision_1m"] = panel["eps_consensus"] - g["eps_consensus"].shift(1)
+    panel["eps_revision_3m"] = panel["eps_consensus"] - g["eps_consensus"].shift(3)
+    panel["eps_consensus_chg_std"] = g["eps_consensus"].transform(
         lambda s: s.diff().rolling(6, min_periods=3).std()
     )
 
-    # SUE at announcement: (actual - consensus) / stdev; lag onto later STATPERS.
-    surprise = (mapped["actual"] - mapped["eps_consensus"]) / mapped["stdev"].replace(
-        0, np.nan
-    )
-    mapped["_sue"] = surprise
-    mapped["sue_lag1"] = g["_sue"].shift(1)
-    mapped["sue_lag2"] = g["_sue"].shift(2)
-    beat = (mapped["actual"] > mapped["eps_consensus"]).astype(float)
-    mapped["beat_rate_4q"] = (
-        beat.groupby(mapped["TickerId"], sort=False)
-        .transform(lambda s: s.rolling(4, min_periods=1).mean())
-    )
+    # SUE/beat live on the event cache (available_on), not STATPERS rows.
+    for col in EVENT_FEATURES:
+        panel[col] = np.nan
     # Revenue surprise not in EPS summary; leave NaN unless extended later.
-    mapped["rev_surprise_lag1"] = np.nan
+    panel["rev_surprise_lag1"] = np.nan
 
-    mapped["ltg"] = np.nan
+    panel["ltg"] = np.nan
     if ltg is not None and len(ltg):
         ltg = ltg.copy()
         ltg["statpers"] = pd.to_datetime(ltg["statpers"]).dt.normalize()
@@ -186,19 +391,34 @@ def _download_ibes_frame(
         ltg_m = ltg_m.sort_values(["TickerId", "statpers"]).drop_duplicates(
             ["TickerId", "statpers"], keep="last"
         )
-        mapped = mapped.drop(columns=["ltg"], errors="ignore")
-        mapped = mapped.merge(
+        panel = panel.drop(columns=["ltg"], errors="ignore")
+        panel = panel.merge(
             ltg_m.loc[:, ["TickerId", "statpers", "ltg"]],
             on=["TickerId", "statpers"],
             how="left",
         )
 
-    out = mapped.rename(columns={"statpers": ASOF_COLUMN})
-    cols = [TICKER_COLUMN, ASOF_COLUMN, *ALL_IBES]
+    snap_out = panel.rename(columns={"statpers": ASOF_COLUMN})
+    snap_cols = [TICKER_COLUMN, ASOF_COLUMN, *ALL_IBES]
     for col in ALL_IBES:
-        if col not in out.columns:
-            out[col] = np.nan
-    return out.loc[:, cols].reset_index(drop=True)
+        if col not in snap_out.columns:
+            snap_out[col] = np.nan
+    snap_out = snap_out.loc[:, snap_cols].reset_index(drop=True)
+
+    if events.empty:
+        event_out = pd.DataFrame(
+            columns=[TICKER_COLUMN, ASOF_COLUMN, *EVENT_FEATURES]
+        )
+    else:
+        event_out = events.rename(columns={"available_on": ASOF_COLUMN})
+        for col in EVENT_FEATURES:
+            if col not in event_out.columns:
+                event_out[col] = np.nan
+        event_out = event_out.loc[
+            :, [TICKER_COLUMN, ASOF_COLUMN, *EVENT_FEATURES]
+        ].reset_index(drop=True)
+
+    return snap_out, event_out
 
 
 def fetch_ibes_cache(
@@ -209,7 +429,7 @@ def fetch_ibes_cache(
     ibes_features: list[str] | None = None,
     username: str | None = None,
 ) -> pd.DataFrame:
-    """Download from WRDS and write cache (``script/fetch_wrds_ibes.py`` only)."""
+    """Download from WRDS and write ``ibes`` + ``ibes_sue`` caches."""
     wanted = list(IBES_FEATURES if ibes_features is None else ibes_features)
     if not wanted:
         raise ValueError("IBES_FEATURES is empty; nothing to fetch.")
@@ -219,18 +439,35 @@ def fetch_ibes_cache(
 
     universe = load_universe(folder)
     uhash = universe_hash(universe.get("permno", universe["TickerId"]).tolist())
-    frame = _download_ibes_frame(folder, start, end, username=username)
-    write_feature_cache(
-        folder,
-        "ibes",
-        frame,
-        features=wanted,
-        universe_hash_value=uhash,
-        query_fingerprint=QUERY_FINGERPRINT,
+    snap_frame, event_frame = _download_ibes_frame(
+        folder, start, end, username=username
     )
-    return load_cached_or_raise(
-        folder, "ibes", features=wanted, start=start, end=end
-    )
+    snap_feats, event_feats = split_ibes_features(wanted)
+
+    if snap_feats:
+        write_feature_cache(
+            folder,
+            STEM_SNAP,
+            snap_frame,
+            features=snap_feats,
+            universe_hash_value=uhash,
+            query_fingerprint=QUERY_FINGERPRINT,
+        )
+    if event_feats and len(event_frame) > 0:
+        write_feature_cache(
+            folder,
+            STEM_SUE,
+            event_frame,
+            features=event_feats,
+            universe_hash_value=uhash,
+            query_fingerprint=QUERY_FINGERPRINT,
+        )
+
+    if snap_feats:
+        return load_cached_or_raise(
+            folder, STEM_SNAP, features=snap_feats, start=start, end=end
+        )
+    return event_frame
 
 
 def load_ibes(
@@ -240,15 +477,16 @@ def load_ibes(
     *,
     ibes_features: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Read IBES cache only. Missing → error pointing at fetch script."""
+    """Read IBES STATPERS snapshot cache only (not SUE event cache)."""
     wanted = list(IBES_FEATURES if ibes_features is None else ibes_features)
-    if not wanted:
+    snap_feats, _event_feats = split_ibes_features(wanted)
+    if not snap_feats:
         return pd.DataFrame(columns=[TICKER_COLUMN, ASOF_COLUMN])
-    unknown = [n for n in wanted if n not in ALL_IBES]
+    unknown = [n for n in snap_feats if n not in ALL_IBES]
     if unknown:
         raise ValueError(f"Unknown IBES_FEATURES {unknown}; allowed: {list(ALL_IBES)}")
     return load_cached_or_raise(
-        folder, "ibes", features=wanted, start=start, end=end
+        folder, STEM_SNAP, features=snap_feats, start=start, end=end
     )
 
 
@@ -266,12 +504,50 @@ def attach_ibes(
 
     folder = DATA_DIR if data_dir is None else data_dir
     dates = pd.to_datetime(frame["Date"]).dt.normalize()
-    cache = load_ibes(folder, dates.min(), dates.max(), ibes_features=wanted)
-    return asof_attach(
-        frame,
-        cache,
-        features=wanted,
-        date_column="Date",
-        age_feature="days_since_est_update",
-        desc="ibes",
-    )
+    snap_feats, event_feats = split_ibes_features(wanted)
+    out = frame.copy()
+
+    if snap_feats:
+        snap_cache = load_cached_or_raise(
+            folder,
+            STEM_SNAP,
+            features=snap_feats,
+            start=dates.min(),
+            end=dates.max(),
+        )
+        age = (
+            "days_since_est_update"
+            if "days_since_est_update" in snap_feats
+            else None
+        )
+        out = asof_attach(
+            out,
+            snap_cache,
+            features=snap_feats,
+            date_column="Date",
+            age_feature=age,
+            desc="ibes",
+        )
+
+    if event_feats:
+        try:
+            sue_cache = load_cached_or_raise(
+                folder,
+                STEM_SUE,
+                features=event_feats,
+                start=dates.min(),
+                end=dates.max(),
+            )
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Missing {STEM_SUE} feature cache under {folder}. "
+                "Run: python script/fetch_wrds_ibes.py"
+            ) from exc
+        out = asof_attach(
+            out,
+            sue_cache,
+            features=event_feats,
+            date_column="Date",
+            desc="ibes_sue",
+        )
+    return out
