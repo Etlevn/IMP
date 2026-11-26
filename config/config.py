@@ -61,11 +61,23 @@ ANALYST_FEATURES = [
 ]
 
 # Maps feature column name -> yfinance ticker (src/features/macro.py).
-# Cached under data/macro_daily.parquet (+ .json).
+# Cached under data/macro_daily.parquet (+ .json). Close levels only.
 MACRO_FEATURES = {
     "vix": "^VIX",
     "tnx": "^TNX",
     "dxy": "DX-Y.NYB",
+    "spy": "SPY",
+    "qqq": "QQQ",
+    "iwm": "IWM",
+    "irx": "^IRX",
+    "hyg": "HYG",
+    "oil": "CL=F",
+    "gold": "GC=F",
+    "tyx": "^TYX",
+    "lqd": "LQD",
+    "copper": "HG=F",
+    "move": "^MOVE",
+    "vnq": "VNQ",
 }
 
 # Allowed: mom_21d | vol_21d | log_mcap | par_mkt (src/features/engineered.py).
