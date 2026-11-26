@@ -4,7 +4,6 @@
 _*/
 notes/
 output/
-# Local panels / caches; keep the folder via .gitkeep only.
 data/*
 !data/.gitkeep
 __pycache__/

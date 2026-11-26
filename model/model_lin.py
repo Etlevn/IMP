@@ -1,4 +1,4 @@
-"""Linear estimators for the IMP event table (ols / ridge / lasso / logistic)."""
+"""Linear estimators for the IMP event table."""
 
 from __future__ import annotations
 
@@ -6,19 +6,32 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import Lasso, LinearRegression, LogisticRegression, Ridge
+from sklearn.linear_model import (
+    ElasticNet,
+    HuberRegressor,
+    Lasso,
+    LinearRegression,
+    LogisticRegression,
+    QuantileRegressor,
+    Ridge,
+)
 
 from src.metrics import evaluate_regression
 
-ALLOWED_LINEAR_TYPES = frozenset({"ols", "ridge", "lasso", "logistic"})
+ALLOWED_LINEAR_TYPES = frozenset(
+    {"ols", "ridge", "lasso", "logistic", "elasticnet", "huber", "quantile"}
+)
 CLASSIFICATION_TYPES = frozenset({"logistic"})
-ALPHA_TUNABLE_TYPES = frozenset({"ridge", "lasso"})
+ALPHA_TUNABLE_TYPES = frozenset(
+    {"ridge", "lasso", "elasticnet", "huber", "quantile"}
+)
 
 
 def create_linear_model(
     model_type: str,
     *,
     alpha: float = 1.0,
+    l1_ratio: float = 0.5,
     random_state: int = 42,
 ) -> Any:
     """Build an unfitted sklearn linear estimator."""
@@ -33,6 +46,21 @@ def create_linear_model(
         return Ridge(alpha=alpha, random_state=random_state)
     if model_type == "lasso":
         return Lasso(alpha=alpha, random_state=random_state, max_iter=10_000)
+    if model_type == "elasticnet":
+        return ElasticNet(
+            alpha=alpha,
+            l1_ratio=l1_ratio,
+            random_state=random_state,
+            max_iter=10_000,
+        )
+    if model_type == "huber":
+        return HuberRegressor(alpha=alpha, max_iter=500)
+    if model_type == "quantile":
+        return QuantileRegressor(
+            quantile=0.5,
+            alpha=alpha,
+            solver="highs",
+        )
     return LogisticRegression(random_state=random_state, max_iter=2_000)
 
 
@@ -56,6 +84,7 @@ def select_alpha_on_val(
     *,
     alpha_grid: tuple[float, ...] | list[float],
     default_alpha: float,
+    l1_ratio: float = 0.5,
     random_state: int = 42,
 ) -> tuple[float, pd.DataFrame]:
     """Pick alpha on validation by maximizing ``oos_r2`` (fallback: min RMSE).
@@ -70,7 +99,10 @@ def select_alpha_on_val(
     rows: list[dict[str, float]] = []
     for alpha in alpha_grid:
         model = create_linear_model(
-            model_type, alpha=float(alpha), random_state=random_state
+            model_type,
+            alpha=float(alpha),
+            l1_ratio=float(l1_ratio),
+            random_state=random_state,
         )
         fit_linear_model(model, X_train, y_train)
         metrics = evaluate_regression(

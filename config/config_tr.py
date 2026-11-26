@@ -25,15 +25,18 @@ FEATURE_COLUMNS = enabled_features()
 # Label for config / logs. Any non-empty string.
 MODEL_LABEL = "tr"
 
-# Models to run under the same preprocess config (one section each).
-# Allowed: "decision_tree" | "random_forest" | "hist_gradient_boosting"
+# Allowed: decision_tree | random_forest | hist_gradient_boosting |
+#          lightgbm | xgboost | catboost
 TREE_MODEL_TYPES = (
     "decision_tree",
     "random_forest",
     "hist_gradient_boosting",
+    "lightgbm",
+    "xgboost",
+    "catboost",
 )
 
-# Number of trees / boosting stages (cap for HistGBDT early stopping).
+# Number of trees / boosting stages (cap for early stopping).
 # Allowed: int >= 1. Ignored for decision_tree.
 N_ESTIMATORS = 200
 
@@ -51,7 +54,7 @@ LEARNING_RATE = 0.05
 # Minimum samples in a leaf. Allowed: int >= 1
 MIN_SAMPLES_LEAF = 20
 
-# HistGBDT: stop if chronological val OOS R² does not improve.
+# Boosted trees: stop if chronological val metric does not improve.
 # Allowed: int >= 1
 EARLY_STOPPING_PATIENCE = 10
 

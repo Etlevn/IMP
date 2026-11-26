@@ -70,11 +70,12 @@ def fit_lin(
     if model_type in CLASSIFICATION_TYPES:
         raise ValueError(
             f"model_type={model_type!r} needs classification support; "
-            "use ols | ridge | lasso."
+            "use ols | ridge | lasso | elasticnet | huber | quantile."
         )
 
     train = result.folds["train"]
     val = result.folds["val"]
+    l1_ratio = float(getattr(C, "L1_RATIO", 0.5))
     selected_alpha = float(C.ALPHA)
     tuning: pd.DataFrame | None = None
     if model_type in ALPHA_TUNABLE_TYPES:
@@ -86,22 +87,27 @@ def fit_lin(
             val.y,
             alpha_grid=tuple(C.ALPHA_GRID),
             default_alpha=float(C.ALPHA),
+            l1_ratio=l1_ratio,
             random_state=C.RANDOM_STATE,
         )
 
     model = create_linear_model(
         model_type,
         alpha=selected_alpha,
+        l1_ratio=l1_ratio,
         random_state=C.RANDOM_STATE,
     )
     fit_linear_model(model, train.X, train.y)
+    extras: dict[str, float | int | str] = {"alpha": float(selected_alpha)}
+    if model_type == "elasticnet":
+        extras["l1_ratio"] = l1_ratio
     return FitBundle(
         model=model,
         predict=lambda X, m=model: predict_linear(m, X),
         tuning=tuning,
         selected=selected_alpha if tuning is not None else None,
         tuning_label="ALPHA",
-        summary_extras={"alpha": float(selected_alpha)},
+        summary_extras=extras,
     )
 
 
@@ -186,6 +192,7 @@ def fit_nn(
         import config.config_nn as config
     C = config
     from model.model_nn import (
+        TORCH_NN_TYPES,
         create_nn_model,
         fit_nn_model,
         predict_nn,
@@ -194,6 +201,11 @@ def fit_nn(
 
     train = result.folds["train"]
     val = result.folds["val"]
+    dropout = float(getattr(C, "DROPOUT", 0.1))
+    ft_d_model = int(getattr(C, "FT_D_MODEL", 32))
+    ft_layers = int(getattr(C, "FT_LAYERS", 2))
+    ft_heads = int(getattr(C, "FT_HEADS", 4))
+    device = str(getattr(C, "DEVICE", "cpu"))
     selected_alpha, tuning = select_alpha_on_val(
         model_type,
         train.X,
@@ -207,16 +219,27 @@ def fit_nn(
         batch_size=int(C.BATCH_SIZE),
         max_iter=int(C.MAX_ITER),
         early_stopping_patience=int(C.EARLY_STOPPING_PATIENCE),
+        dropout=dropout,
+        ft_d_model=ft_d_model,
+        ft_layers=ft_layers,
+        ft_heads=ft_heads,
+        device=device,
         random_state=C.RANDOM_STATE,
     )
 
     model = create_nn_model(
         model_type,
+        n_features=int(train.X.shape[1]),
         hidden_sizes=dict(C.HIDDEN_SIZES),
         alpha=float(selected_alpha),
         learning_rate_init=float(C.LR),
         batch_size=int(C.BATCH_SIZE),
         max_iter=int(C.MAX_ITER),
+        dropout=dropout,
+        ft_d_model=ft_d_model,
+        ft_layers=ft_layers,
+        ft_heads=ft_heads,
+        device=device,
         random_state=C.RANDOM_STATE,
     )
     model, fit_info = fit_nn_model(
@@ -226,9 +249,22 @@ def fit_nn(
         X_val=val.X,
         y_val=val.y,
         early_stopping_patience=int(C.EARLY_STOPPING_PATIENCE),
+        weight_decay=float(selected_alpha) if model_type in TORCH_NN_TYPES else None,
+        learning_rate_init=float(C.LR),
+        batch_size=int(C.BATCH_SIZE),
+        max_iter=int(C.MAX_ITER),
+        random_state=C.RANDOM_STATE,
     )
     best_iteration = int(fit_info["best_iteration"])
     hidden = C.HIDDEN_SIZES.get(model_type, ())
+    extras: dict[str, float | int | str] = {
+        "alpha": float(selected_alpha),
+        "best_iteration": int(best_iteration),
+    }
+    if hidden:
+        extras["hidden"] = str(tuple(hidden))
+    if model_type in TORCH_NN_TYPES:
+        extras["device"] = device
     return FitBundle(
         model=model,
         predict=lambda X, m=model: predict_nn(m, X),
@@ -237,12 +273,8 @@ def fit_nn(
         tuning_label="ALPHA",
         best_iteration=best_iteration,
         max_iter=int(C.MAX_ITER),
-        hidden_sizes=tuple(int(width) for width in hidden),
-        summary_extras={
-            "hidden": str(tuple(hidden)),
-            "alpha": float(selected_alpha),
-            "best_iteration": int(best_iteration),
-        },
+        hidden_sizes=tuple(int(width) for width in hidden) if hidden else None,
+        summary_extras=extras,
     )
 
 
@@ -262,10 +294,12 @@ def _build_lin_spec() -> FamilySpec:
             ("LINEAR_MODEL_TYPES", tuple(C.LINEAR_MODEL_TYPES)),
             ("ALPHA", C.ALPHA),
             ("ALPHA_GRID", tuple(C.ALPHA_GRID)),
+            ("L1_RATIO", C.L1_RATIO),
         ),
         config_extra={
             "ALPHA": C.ALPHA,
             "ALPHA_GRID": list(C.ALPHA_GRID),
+            "L1_RATIO": C.L1_RATIO,
         },
     )
 
@@ -323,6 +357,11 @@ def _build_nn_spec() -> FamilySpec:
             ("BATCH_SIZE", C.BATCH_SIZE),
             ("MAX_ITER", C.MAX_ITER),
             ("EARLY_STOPPING_PATIENCE", C.EARLY_STOPPING_PATIENCE),
+            ("DROPOUT", C.DROPOUT),
+            ("FT_D_MODEL", C.FT_D_MODEL),
+            ("FT_LAYERS", C.FT_LAYERS),
+            ("FT_HEADS", C.FT_HEADS),
+            ("DEVICE", C.DEVICE),
         ),
         config_extra={
             "HIDDEN_SIZES": {k: list(v) for k, v in C.HIDDEN_SIZES.items()},
@@ -332,6 +371,11 @@ def _build_nn_spec() -> FamilySpec:
             "BATCH_SIZE": C.BATCH_SIZE,
             "MAX_ITER": C.MAX_ITER,
             "EARLY_STOPPING_PATIENCE": C.EARLY_STOPPING_PATIENCE,
+            "DROPOUT": C.DROPOUT,
+            "FT_D_MODEL": C.FT_D_MODEL,
+            "FT_LAYERS": C.FT_LAYERS,
+            "FT_HEADS": C.FT_HEADS,
+            "DEVICE": C.DEVICE,
         },
     )
 

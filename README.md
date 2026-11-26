@@ -112,19 +112,19 @@ Val is used for **selection and early stopping** (maximize OOS R²; tie-break lo
 
 | Family | Selected on val         | Early stopping       |
 | ------ | ----------------------- | -------------------- |
-| lin    | `alpha` (ridge / lasso) | —                    |
-| tr     | `max_depth`             | HistGBDT: val OOS R² |
-| nn     | L2 `alpha`              | all MLPs: val OOS R² |
+| lin    | `alpha` (regularized / huber / quantile) | — |
+| tr     | `max_depth`             | HistGBDT + LGBM/XGB/CatBoost |
+| nn     | L2 / weight-decay `alpha` | all nets: val OOS R² |
 
-HistGBDT / MLP do not use sklearn’s random `validation_fraction` holdout from train.
+HistGBDT / MLP / torch nets do not use sklearn’s random `validation_fraction` holdout from train.
 
 ## Models
 
-| Family | Config                 | Types                                                      |
-| ------ | ---------------------- | ---------------------------------------------------------- |
-| lin    | `config/config_lin.py` | `ols`, `ridge`, `lasso`                                    |
-| tr     | `config/config_tr.py`  | `decision_tree`, `random_forest`, `hist_gradient_boosting` |
-| nn     | `config/config_nn.py`  | `mlp_shallow`, `mlp`, `mlp_deep`                           |
+| Family | Config                 | Types |
+| ------ | ---------------------- | ----- |
+| lin    | `config/config_lin.py` | `ols`, `ridge`, `lasso`, `elasticnet`, `huber`, `quantile` |
+| tr     | `config/config_tr.py`  | `decision_tree`, `random_forest`, `hist_gradient_boosting`, `lightgbm`, `xgboost`, `catboost` |
+| nn     | `config/config_nn.py`  | `mlp_shallow`, `mlp`, `mlp_deep`, `mlp_dropout`, `wide_deep`, `ft_transformer` |
 
 Select runs in `config_main.py` (`MODELS`: each model lists one or more feature combinations; `[]` skips). Classification (`dir_ann`) is reserved. Shared target / cuts: `config/config.py`.
 

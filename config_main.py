@@ -13,36 +13,63 @@ from __future__ import annotations
 # Empty list = skip that model. A flat list is treated as a single combination.
 MODELS: dict[str, dict[str, list]] = {
     "lin": {
-        "ols": [
-            [],
+        # "ols": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        # "ridge": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        # "lasso": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        "elasticnet": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
-        "ridge": [
-            [],
+        "huber": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
-        "lasso": [
-            [],
+        "quantile": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
     },
     "tr": {
-        "decision_tree": [
-            [],
+        # "decision_tree": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        # "random_forest": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        # "hist_gradient_boosting": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        "lightgbm": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
-        "random_forest": [
-            [],
+        "xgboost": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
-        "hist_gradient_boosting": [
-            [],
+        "catboost": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
     },
     "nn": {
-        "mlp_shallow": [
-            [],
+        # "mlp_shallow": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        # "mlp": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        # "mlp_deep": [
+        #     ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
+        # ],
+        "mlp_dropout": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
-        "mlp": [
-            [],
+        "wide_deep": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
-        "mlp_deep": [
-            [],
+        "ft_transformer": [
+            ["par_mkt", "log_mcap", "vol_21d", "vix", "dxy"],
         ],
     },
 }

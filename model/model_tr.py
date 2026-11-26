@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import numpy as np
@@ -11,12 +12,60 @@ from sklearn.tree import DecisionTreeRegressor
 
 from src.metrics import evaluate_regression
 
+# Avoid OpenMP runtime clashes when torch and GBDT share one process.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 ALLOWED_TREE_TYPES = frozenset(
-    {"decision_tree", "random_forest", "hist_gradient_boosting"}
+    {
+        "decision_tree",
+        "random_forest",
+        "hist_gradient_boosting",
+        "lightgbm",
+        "xgboost",
+        "catboost",
+    }
 )
 # Tree models select max_depth on the chronological val fold.
 DEPTH_TUNABLE_TYPES = ALLOWED_TREE_TYPES
-EARLY_STOP_TYPES = frozenset({"hist_gradient_boosting"})
+EARLY_STOP_TYPES = frozenset(
+    {"hist_gradient_boosting", "lightgbm", "xgboost", "catboost"}
+)
+
+
+def _require_lightgbm():
+    try:
+        import lightgbm as lgb
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "lightgbm is required for model_type='lightgbm'. "
+            "Install with: pip install lightgbm"
+        ) from exc
+    return lgb
+
+
+def _require_xgboost():
+    try:
+        import xgboost as xgb
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "xgboost is required for model_type='xgboost'. "
+            "Install with: pip install xgboost"
+        ) from exc
+    return xgb
+
+
+def _require_catboost():
+    try:
+        from catboost import CatBoostRegressor
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "catboost is required for model_type='catboost'. "
+            "Install with: pip install catboost"
+        ) from exc
+    return CatBoostRegressor
 
 
 def create_tree_model(
@@ -28,10 +77,11 @@ def create_tree_model(
     min_samples_leaf: int = 20,
     random_state: int = 42,
 ) -> Any:
-    """Build an unfitted sklearn tree / ensemble regressor.
+    """Build an unfitted tree / ensemble regressor.
 
-    HistGradientBoosting does **not** use sklearn's random ``validation_fraction``
-    early stopping; call ``fit_tree_model`` with the chronological val fold.
+    HistGradientBoosting and external GBDT models do **not** use random
+    validation splits for early stopping; call ``fit_tree_model`` with the
+    chronological val fold.
     """
     if model_type not in ALLOWED_TREE_TYPES:
         raise ValueError(
@@ -52,14 +102,50 @@ def create_tree_model(
             random_state=random_state,
             n_jobs=-1,
         )
-    return HistGradientBoostingRegressor(
-        max_iter=n_estimators,
-        max_depth=max_depth,
+    if model_type == "hist_gradient_boosting":
+        return HistGradientBoostingRegressor(
+            max_iter=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            min_samples_leaf=min_samples_leaf,
+            early_stopping=False,
+            warm_start=False,
+            random_state=random_state,
+        )
+    if model_type == "lightgbm":
+        lgb = _require_lightgbm()
+        return lgb.LGBMRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            min_child_samples=min_samples_leaf,
+            random_state=random_state,
+            n_jobs=1,
+            verbosity=-1,
+        )
+    if model_type == "xgboost":
+        xgb = _require_xgboost()
+        return xgb.XGBRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            min_child_weight=min_samples_leaf,
+            random_state=random_state,
+            n_jobs=1,
+            verbosity=0,
+            objective="reg:squarederror",
+        )
+    CatBoostRegressor = _require_catboost()
+    return CatBoostRegressor(
+        iterations=n_estimators,
+        depth=max_depth,
         learning_rate=learning_rate,
-        min_samples_leaf=min_samples_leaf,
-        early_stopping=False,
-        warm_start=False,
-        random_state=random_state,
+        min_data_in_leaf=min_samples_leaf,
+        random_seed=random_state,
+        thread_count=1,
+        verbose=False,
+        loss_function="RMSE",
+        allow_writing_files=False,
     )
 
 
@@ -125,6 +211,81 @@ def _fit_hgb_on_chronological_val(
     return final, best_iter
 
 
+def _fit_external_booster_on_val(
+    model: Any,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    *,
+    early_stopping_patience: int,
+) -> tuple[Any, int]:
+    """Fit LGBM / XGB / CatBoost with chronological val early stopping."""
+    name = type(model).__name__.lower()
+    if "lgbm" in name:
+        lgb = _require_lightgbm()
+        callbacks = [
+            lgb.early_stopping(
+                stopping_rounds=int(early_stopping_patience),
+                verbose=False,
+            )
+        ]
+        try:
+            model.fit(
+                X_train,
+                y_train,
+                eval_X=X_val,
+                eval_y=y_val,
+                callbacks=callbacks,
+            )
+        except TypeError:
+            model.fit(
+                X_train,
+                y_train,
+                eval_set=[(X_val, y_val)],
+                callbacks=callbacks,
+            )
+        best_iter = int(getattr(model, "best_iteration_", 0) or 0)
+        if best_iter <= 0:
+            best_iter = int(model.n_estimators)
+        return model, best_iter
+    if "xgb" in name:
+        try:
+            model.set_params(early_stopping_rounds=int(early_stopping_patience))
+        except ValueError:
+            pass
+        try:
+            model.fit(
+                X_train,
+                y_train,
+                eval_set=[(X_val, y_val)],
+                verbose=False,
+            )
+        except TypeError:
+            model.fit(X_train, y_train, eval_set=[(X_val, y_val)])
+        best_iter = int(getattr(model, "best_iteration", 0) or 0)
+        if best_iter <= 0:
+            booster = getattr(model, "get_booster", lambda: None)()
+            if booster is not None:
+                best_iter = int(getattr(booster, "best_iteration", 0) or 0)
+        if best_iter <= 0:
+            best_iter = int(model.n_estimators)
+        return model, best_iter
+    # CatBoost
+    model.fit(
+        X_train,
+        y_train,
+        eval_set=(X_val, y_val),
+        early_stopping_rounds=int(early_stopping_patience),
+        use_best_model=True,
+        verbose=False,
+    )
+    best_iter = int(model.get_best_iteration() or 0)
+    if best_iter <= 0:
+        best_iter = int(model.tree_count_)
+    return model, best_iter
+
+
 def fit_tree_model(
     model: Any,
     X_train: pd.DataFrame,
@@ -134,7 +295,7 @@ def fit_tree_model(
     y_val: pd.Series | None = None,
     early_stopping_patience: int = 10,
 ) -> tuple[Any, dict[str, float | int]]:
-    """Fit on train; HistGBDT early-stops on chronological val when provided."""
+    """Fit on train; boosted trees early-stop on chronological val when provided."""
     X_tr = X_train.to_numpy(dtype=float)
     y_tr = np.asarray(y_train, dtype=float)
     info: dict[str, float | int] = {}
@@ -164,13 +325,36 @@ def fit_tree_model(
         info["best_iteration"] = int(best_iter)
         return fitted, info
 
+    model_name = type(model).__name__.lower()
+    is_external = any(
+        token in model_name for token in ("lgbm", "xgb", "catboost")
+    )
+    if is_external:
+        if X_val is None or y_val is None:
+            raise ValueError(
+                f"{type(model).__name__} requires chronological X_val / y_val "
+                "for early stopping."
+            )
+        X_va = X_val.to_numpy(dtype=float)
+        y_va = np.asarray(y_val, dtype=float)
+        fitted, best_iter = _fit_external_booster_on_val(
+            model,
+            X_tr,
+            y_tr,
+            X_va,
+            y_va,
+            early_stopping_patience=int(early_stopping_patience),
+        )
+        info["best_iteration"] = int(best_iter)
+        return fitted, info
+
     model.fit(X_tr, y_tr)
     return model, info
 
 
 def predict_tree(model: Any, X: pd.DataFrame) -> np.ndarray:
     """Continuous predictions."""
-    return model.predict(X.to_numpy(dtype=float))
+    return np.asarray(model.predict(X.to_numpy(dtype=float)), dtype=float)
 
 
 def select_max_depth_on_val(

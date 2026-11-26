@@ -25,22 +25,30 @@ FEATURE_COLUMNS = enabled_features()
 # Label for config / logs. Any non-empty string.
 MODEL_LABEL = "nn"
 
-# Models to run under the same preprocess config (one section each).
-# Allowed: "mlp_shallow" | "mlp" | "mlp_deep"
-NN_MODEL_TYPES = ("mlp_shallow", "mlp", "mlp_deep")
+# Allowed: mlp_shallow | mlp | mlp_deep | mlp_dropout | wide_deep | ft_transformer
+NN_MODEL_TYPES = (
+    "mlp_shallow",
+    "mlp",
+    "mlp_deep",
+    "mlp_dropout",
+    "wide_deep",
+    "ft_transformer",
+)
 
-# Hidden widths keyed by model type (sklearn MLPRegressor).
+# Hidden widths keyed by model type (sklearn MLP + torch MLP/wide_deep).
 HIDDEN_SIZES = {
     "mlp_shallow": (64,),
     "mlp": (64, 32),
     "mlp_deep": (128, 64, 32),
+    "mlp_dropout": (64, 32),
+    "wide_deep": (64, 32),
 }
 
-# Default L2 penalty when ALPHA_GRID is empty.
+# Default L2 / Adam weight-decay when ALPHA_GRID is empty.
 # Allowed: float >= 0
 ALPHA = 1e-4
 
-# Candidate L2 penalties tuned on chronological validation (all MLP types).
+# Candidate L2 / weight-decay values tuned on chronological validation.
 # Allowed: non-empty sequence of floats >= 0, or () to use ALPHA as-is.
 ALPHA_GRID = (1e-5, 1e-4, 1e-3, 1e-2)
 
@@ -56,6 +64,17 @@ MAX_ITER = 200
 # Stop if chronological val OOS R² does not improve for this many epochs.
 # Allowed: int >= 1
 EARLY_STOPPING_PATIENCE = 8
+
+# Dropout rate for torch nets. Allowed: float in [0, 1)
+DROPOUT = 0.1
+
+# Lightweight FT-Transformer dims (feature-token attention).
+FT_D_MODEL = 32
+FT_LAYERS = 2
+FT_HEADS = 4
+
+# Torch device. Allowed: "cpu" | "cuda" | "mps" (as supported by torch)
+DEVICE = "cpu"
 
 # Z-score features with train-set mean/std. Allowed: True | False
 STANDARDIZE = True

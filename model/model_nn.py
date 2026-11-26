@@ -1,4 +1,4 @@
-"""Neural estimators for the IMP event table (sklearn MLPRegressor)."""
+"""Neural estimators for the IMP event table (sklearn MLP + PyTorch nets)."""
 
 from __future__ import annotations
 
@@ -9,31 +9,47 @@ import numpy as np
 import pandas as pd
 from sklearn.neural_network import MLPRegressor
 
+from model.torch_nn import (
+    TorchBundle,
+    create_torch_model,
+    fit_torch_regressor,
+    predict_torch,
+)
 from src.metrics import evaluate_regression
 
-ALLOWED_NN_TYPES = frozenset({"mlp_shallow", "mlp", "mlp_deep"})
+SKLEARN_MLP_TYPES = frozenset({"mlp_shallow", "mlp", "mlp_deep"})
+TORCH_NN_TYPES = frozenset({"mlp_dropout", "wide_deep", "ft_transformer"})
+ALLOWED_NN_TYPES = SKLEARN_MLP_TYPES | TORCH_NN_TYPES
 ALPHA_TUNABLE_TYPES = ALLOWED_NN_TYPES
 
 DEFAULT_HIDDEN_SIZES: dict[str, tuple[int, ...]] = {
     "mlp_shallow": (64,),
     "mlp": (64, 32),
     "mlp_deep": (128, 64, 32),
+    "mlp_dropout": (64, 32),
+    "wide_deep": (64, 32),
 }
 
 
 def create_nn_model(
     model_type: str,
     *,
+    n_features: int | None = None,
     hidden_sizes: dict[str, tuple[int, ...]] | None = None,
     alpha: float = 1e-4,
     learning_rate_init: float = 1e-3,
     batch_size: int = 64,
     max_iter: int = 200,
+    dropout: float = 0.1,
+    ft_d_model: int = 32,
+    ft_layers: int = 2,
+    ft_heads: int = 4,
+    device: str = "cpu",
     random_state: int = 42,
 ) -> Any:
-    """Build an unfitted sklearn MLPRegressor.
+    """Build an unfitted neural estimator (sklearn MLP or TorchBundle).
 
-    Does **not** use sklearn's random ``validation_fraction`` early stopping;
+    Does **not** use random ``validation_fraction`` early stopping;
     call ``fit_nn_model`` with the chronological val fold.
     """
     if model_type not in ALLOWED_NN_TYPES:
@@ -42,6 +58,24 @@ def create_nn_model(
             f"allowed: {sorted(ALLOWED_NN_TYPES)}"
         )
     sizes_map = DEFAULT_HIDDEN_SIZES if hidden_sizes is None else hidden_sizes
+
+    if model_type in TORCH_NN_TYPES:
+        if n_features is None or int(n_features) < 1:
+            raise ValueError(
+                f"{model_type!r} requires n_features >= 1 at create time."
+            )
+        hidden = tuple(int(x) for x in sizes_map.get(model_type, (64, 32)))
+        return create_torch_model(
+            model_type,
+            n_features=int(n_features),
+            hidden_sizes=hidden,
+            dropout=float(dropout),
+            ft_d_model=int(ft_d_model),
+            ft_layers=int(ft_layers),
+            ft_heads=int(ft_heads),
+            device=str(device),
+        )
+
     if model_type not in sizes_map:
         raise KeyError(f"HIDDEN_SIZES missing entry for {model_type!r}")
     hidden = tuple(int(x) for x in sizes_map[model_type])
@@ -85,15 +119,29 @@ def fit_nn_model(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     early_stopping_patience: int = 8,
+    weight_decay: float | None = None,
+    learning_rate_init: float = 1e-3,
+    batch_size: int = 64,
+    max_iter: int = 200,
+    random_state: int = 42,
 ) -> tuple[Any, dict[str, float | int]]:
-    """Fit one epoch at a time; early-stop on chronological validation OOS R².
+    """Fit with chronological validation early stopping on ``oos_r2``."""
+    if isinstance(model, TorchBundle):
+        fitted = fit_torch_regressor(
+            model,
+            X_train,
+            y_train,
+            X_val,
+            y_val,
+            weight_decay=float(0.0 if weight_decay is None else weight_decay),
+            learning_rate=float(learning_rate_init),
+            batch_size=int(batch_size),
+            max_epochs=int(max_iter),
+            early_stopping_patience=int(early_stopping_patience),
+            random_state=int(random_state),
+        )
+        return fitted, {"best_iteration": int(fitted.best_iteration)}
 
-    ``MLPRegressor.fit`` runs ``max_iter`` additional epochs on every warm-start
-    call. Increasing ``max_iter`` from 1, 2, 3, ... therefore trains a
-    triangular number of epochs. ``partial_fit`` performs exactly one epoch and
-    preserves Adam's optimizer state, so the reported ``best_iteration`` now
-    matches the actual number of passes over the training fold.
-    """
     X_tr = X_train.to_numpy(dtype=float)
     y_tr = np.asarray(y_train, dtype=float)
     X_va = X_val.to_numpy(dtype=float)
@@ -122,8 +170,6 @@ def fit_nn_model(
             best_epoch = epoch
             best_oos = oos
             best_rmse = rmse
-            # Preserve the complete estimator state at the best epoch, including
-            # Adam's moments, iteration counters, and the fitted network weights.
             best_model = deepcopy(probe)
             stale = 0
         else:
@@ -134,8 +180,6 @@ def fit_nn_model(
     if best_model is None:
         raise RuntimeError("MLP early stopping failed to record any weights.")
 
-    # ``partial_fit`` reports one iteration per call; expose the total number of
-    # completed epochs for downstream reporting.
     best_model.n_iter_ = best_epoch
     best_model.set_params(max_iter=max_epochs, warm_start=False)
     return best_model, {"best_iteration": int(best_epoch)}
@@ -143,6 +187,8 @@ def fit_nn_model(
 
 def predict_nn(model: Any, X: pd.DataFrame) -> np.ndarray:
     """Continuous predictions."""
+    if isinstance(model, TorchBundle):
+        return predict_torch(model, X)
     return model.predict(X.to_numpy(dtype=float))
 
 
@@ -160,22 +206,34 @@ def select_alpha_on_val(
     batch_size: int = 64,
     max_iter: int = 200,
     early_stopping_patience: int = 8,
+    dropout: float = 0.1,
+    ft_d_model: int = 32,
+    ft_layers: int = 2,
+    ft_heads: int = 4,
+    device: str = "cpu",
     random_state: int = 42,
 ) -> tuple[float, pd.DataFrame]:
-    """Pick L2 ``alpha`` on chronological val by maximizing ``oos_r2``."""
+    """Pick L2 / weight-decay ``alpha`` on chronological val by maximizing ``oos_r2``."""
     if model_type not in ALPHA_TUNABLE_TYPES or not alpha_grid:
         return float(default_alpha), pd.DataFrame()
 
     train_mean = float(np.asarray(y_train, dtype=float).mean())
     rows: list[dict[str, float]] = []
+    n_features = int(X_train.shape[1])
     for alpha in alpha_grid:
         model = create_nn_model(
             model_type,
+            n_features=n_features,
             hidden_sizes=hidden_sizes,
             alpha=float(alpha),
             learning_rate_init=learning_rate_init,
             batch_size=batch_size,
             max_iter=max_iter,
+            dropout=dropout,
+            ft_d_model=ft_d_model,
+            ft_layers=ft_layers,
+            ft_heads=ft_heads,
+            device=device,
             random_state=random_state,
         )
         fitted, _ = fit_nn_model(
@@ -185,6 +243,11 @@ def select_alpha_on_val(
             X_val=X_val,
             y_val=y_val,
             early_stopping_patience=early_stopping_patience,
+            weight_decay=float(alpha) if model_type in TORCH_NN_TYPES else None,
+            learning_rate_init=learning_rate_init,
+            batch_size=batch_size,
+            max_iter=max_iter,
+            random_state=random_state,
         )
         metrics = evaluate_regression(
             y_val,

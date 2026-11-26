@@ -212,12 +212,17 @@ def _used_hyperparams(spec: FamilySpec, model_type: str) -> dict:
     extra = dict(spec.config_extra)
     family = str(spec.name)
     if family == "lin":
-        if model_type in {"ridge", "lasso"}:
-            return {
-                key: extra[key]
-                for key in ("ALPHA", "ALPHA_GRID")
-                if key in extra
-            }
+        if model_type in {
+            "ridge",
+            "lasso",
+            "elasticnet",
+            "huber",
+            "quantile",
+        }:
+            keys = ["ALPHA", "ALPHA_GRID"]
+            if model_type == "elasticnet":
+                keys.append("L1_RATIO")
+            return {key: extra[key] for key in keys if key in extra}
         return {}
     if family == "tr":
         keys = ["MAX_DEPTH", "MAX_DEPTH_GRID", "MIN_SAMPLES_LEAF"]
@@ -225,7 +230,8 @@ def _used_hyperparams(spec: FamilySpec, model_type: str) -> dict:
             pass
         elif model_type == "random_forest":
             keys.append("N_ESTIMATORS")
-        else:  # hist_gradient_boosting
+        else:
+            # hist_gradient_boosting / lightgbm / xgboost / catboost
             keys.extend(
                 ("N_ESTIMATORS", "LEARNING_RATE", "EARLY_STOPPING_PATIENCE")
             )
@@ -246,6 +252,15 @@ def _used_hyperparams(spec: FamilySpec, model_type: str) -> dict:
         hidden = extra.get("HIDDEN_SIZES")
         if isinstance(hidden, dict) and model_type in hidden:
             out["HIDDEN_SIZES"] = hidden[model_type]
+        if model_type == "mlp_dropout" and "DROPOUT" in extra:
+            out["DROPOUT"] = extra["DROPOUT"]
+        if model_type == "ft_transformer":
+            for key in ("FT_D_MODEL", "FT_LAYERS", "FT_HEADS", "DROPOUT", "DEVICE"):
+                if key in extra:
+                    out[key] = extra[key]
+        if model_type in {"mlp_dropout", "wide_deep", "ft_transformer"}:
+            if "DEVICE" in extra:
+                out["DEVICE"] = extra["DEVICE"]
         return out
     return {}
 

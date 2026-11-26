@@ -57,9 +57,11 @@ from src.train import FamilyName, FamilySpec, get_family_spec
 
 # Fixed models. Comment out a family or sub-model to skip it.
 MODELS: dict[str, tuple[str, ...]] = {
-    "lin": ("ols",),    # ["ols", "ridge", "lasso"]
+    "lin": ("ols",),  # also: ridge, lasso, elasticnet, huber, quantile
     "tr": ("decision_tree", "random_forest", "hist_gradient_boosting"),
+    # also: lightgbm, xgboost, catboost
     "nn": ("mlp_shallow", "mlp", "mlp_deep"),
+    # also: mlp_dropout, wide_deep, ft_transformer
 }
 
 # Which feat_filter ``suggest`` labels enter the pool after FEATURE_WHITELIST.

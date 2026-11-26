@@ -17,6 +17,10 @@ dependencies = [
     "wrds",
     "requests",
     "optuna",
+    "lightgbm",
+    "xgboost",
+    "catboost",
+    "torch",
 ]
 
 [build-system]
