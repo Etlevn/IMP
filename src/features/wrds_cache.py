@@ -15,6 +15,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.prepare import _row_bar
+
 ASOF_COLUMN = "asof_date"
 TICKER_COLUMN = "TickerId"
 
@@ -148,6 +150,7 @@ def asof_attach(
     features: Sequence[str],
     date_column: str = "Date",
     age_feature: str | None = None,
+    desc: str = "asof",
 ) -> pd.DataFrame:
     """Backward as-of join of cache features onto the panel.
 
@@ -182,29 +185,33 @@ def asof_attach(
             right[col] = np.nan
 
     pieces: list[pd.DataFrame] = []
-    for ticker, left_g in out.groupby(TICKER_COLUMN, sort=False):
-        left_g = left_g.sort_values(date_column)
-        right_g = right.loc[right[TICKER_COLUMN] == ticker]
-        if right_g.empty:
-            merged = left_g.copy()
-            for col in wanted:
-                merged[col] = np.nan
+    groups = list(out.groupby(TICKER_COLUMN, sort=False))
+    with _row_bar(max(len(groups), 1), desc=desc) as bar:
+        for ticker, left_g in groups:
+            left_g = left_g.sort_values(date_column)
+            right_g = right.loc[right[TICKER_COLUMN] == ticker]
+            if right_g.empty:
+                merged = left_g.copy()
+                for col in wanted:
+                    merged[col] = np.nan
+                pieces.append(merged)
+                bar.update(1)
+                continue
+            merged = pd.merge_asof(
+                left_g,
+                right_g.loc[:, [ASOF_COLUMN, *cache_feats]],
+                left_on=date_column,
+                right_on=ASOF_COLUMN,
+                direction="backward",
+            )
+            if age_feature is not None and age_feature in wanted:
+                merged[age_feature] = (
+                    merged[date_column] - merged[ASOF_COLUMN]
+                ).dt.days.astype(float)
+            if ASOF_COLUMN in merged.columns:
+                merged = merged.drop(columns=[ASOF_COLUMN])
             pieces.append(merged)
-            continue
-        merged = pd.merge_asof(
-            left_g,
-            right_g.loc[:, [ASOF_COLUMN, *cache_feats]],
-            left_on=date_column,
-            right_on=ASOF_COLUMN,
-            direction="backward",
-        )
-        if age_feature is not None and age_feature in wanted:
-            merged[age_feature] = (
-                merged[date_column] - merged[ASOF_COLUMN]
-            ).dt.days.astype(float)
-        if ASOF_COLUMN in merged.columns:
-            merged = merged.drop(columns=[ASOF_COLUMN])
-        pieces.append(merged)
+            bar.update(1)
 
     if not pieces:
         return out

@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from config.config import ANALYST_FEATURES
+from src.prepare import _row_bar
 
 # Fixed parquet / panel field names after sentiment merge.
 COL_STRONG_BUY = "analystRatingsStrongBuy"
@@ -83,25 +84,30 @@ def compute_analyst_features(
     if drop_cols:
         out = out.drop(columns=drop_cols)
 
-    if DERIVED_COVERAGE in wanted:
-        out[DERIVED_COVERAGE] = coverage
+    with _row_bar(len(wanted), desc="analyst") as bar:
+        if DERIVED_COVERAGE in wanted:
+            out[DERIVED_COVERAGE] = coverage
+            bar.update(1)
 
-    if DERIVED_BUY_RATIO in wanted:
-        buy_ratio = np.full(len(out), np.nan, dtype=float)
-        buy_ratio[valid] = (sb0[valid] + b0[valid]) / coverage[valid]
-        out[DERIVED_BUY_RATIO] = buy_ratio
+        if DERIVED_BUY_RATIO in wanted:
+            buy_ratio = np.full(len(out), np.nan, dtype=float)
+            buy_ratio[valid] = (sb0[valid] + b0[valid]) / coverage[valid]
+            out[DERIVED_BUY_RATIO] = buy_ratio
+            bar.update(1)
 
-    if DERIVED_SELL_RATIO in wanted:
-        sell_ratio = np.full(len(out), np.nan, dtype=float)
-        sell_ratio[valid] = (s0[valid] + ss0[valid]) / coverage[valid]
-        out[DERIVED_SELL_RATIO] = sell_ratio
+        if DERIVED_SELL_RATIO in wanted:
+            sell_ratio = np.full(len(out), np.nan, dtype=float)
+            sell_ratio[valid] = (s0[valid] + ss0[valid]) / coverage[valid]
+            out[DERIVED_SELL_RATIO] = sell_ratio
+            bar.update(1)
 
-    if DERIVED_RATING_SCORE in wanted:
-        score = np.full(len(out), np.nan, dtype=float)
-        score[valid] = (
-            2.0 * sb0[valid] + b0[valid] - s0[valid] - 2.0 * ss0[valid]
-        ) / coverage[valid]
-        out[DERIVED_RATING_SCORE] = score
+        if DERIVED_RATING_SCORE in wanted:
+            score = np.full(len(out), np.nan, dtype=float)
+            score[valid] = (
+                2.0 * sb0[valid] + b0[valid] - s0[valid] - 2.0 * ss0[valid]
+            ) / coverage[valid]
+            out[DERIVED_RATING_SCORE] = score
+            bar.update(1)
 
     return out
 

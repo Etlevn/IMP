@@ -137,8 +137,6 @@ def load_macro(
             "Macro cache sha256 mismatch. Re-run: python script/fetch_macro.py"
         )
 
-    with _row_bar(len(cached)) as bar:
-        bar.update(len(cached))
     return cached.loc[:, ["Date", *columns]].sort_values("Date").reset_index(drop=True)
 
 
@@ -148,6 +146,8 @@ def attach_macro(
     macro_features: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Left-merge cached Yahoo macro columns onto ``frame`` by ``Date``."""
+    from src.prepare import _CHUNK
+
     mapping = dict(MACRO_FEATURES if macro_features is None else macro_features)
     if not mapping:
         return frame.copy()
@@ -163,4 +163,11 @@ def attach_macro(
     drop_cols = [c for c in mapping if c in out.columns]
     if drop_cols:
         out = out.drop(columns=drop_cols)
-    return out.merge(macro, on="Date", how="left")
+
+    parts: list[pd.DataFrame] = []
+    with _row_bar(len(out), desc="macro") as bar:
+        for start in range(0, len(out), _CHUNK):
+            chunk = out.iloc[start : start + _CHUNK]
+            parts.append(chunk.merge(macro, on="Date", how="left"))
+            bar.update(len(chunk))
+    return pd.concat(parts, ignore_index=True)

@@ -107,9 +107,11 @@ def _pairwise_ic(x: pd.Series, y: pd.Series) -> tuple[float, float, int]:
 def filter_table(train: pd.DataFrame, features: list[str], target: str) -> pd.DataFrame:
     y = pd.to_numeric(train[target], errors="coerce")
     rows: list[dict[str, object]] = []
-    numeric = {
-        name: pd.to_numeric(train[name], errors="coerce") for name in features
-    }
+    numeric = {}
+    for name in features:
+        series = pd.to_numeric(train[name], errors="coerce")
+        # ±inf breaks mean/std/corr (RuntimeWarning); treat as missing.
+        numeric[name] = series.where(np.isfinite(series), np.nan)
 
     # Skip all-NA / zero-variance columns so corr does not emit divide warnings.
     corr_cols = [

@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from config.config import ENGINEERED_FEATURES
+from src.prepare import _row_bar
 
 PRICE_COLUMN = "LastPrice"
 MCAP_COLUMN = "MarketCap"
@@ -281,9 +282,11 @@ def compute_engineered_features(
         out = out.drop(columns=drop_cols)
 
     ordered = out.sort_values(["TickerId", "Date"], kind="mergesort")
-    for name in wanted:
-        series = _BUILDERS[name](ordered, window)
-        out.loc[ordered.index, name] = series.to_numpy(dtype=float)
+    with _row_bar(len(wanted), desc="engineered") as bar:
+        for name in wanted:
+            series = _BUILDERS[name](ordered, window)
+            out.loc[ordered.index, name] = series.to_numpy(dtype=float)
+            bar.update(1)
 
     return out
 

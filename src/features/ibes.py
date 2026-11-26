@@ -18,7 +18,6 @@ from src.features.wrds_cache import (
     universe_hash,
     write_feature_cache,
 )
-from src.prepare import _row_bar
 
 ALL_IBES = (
     "eps_consensus",
@@ -268,12 +267,11 @@ def attach_ibes(
     folder = DATA_DIR if data_dir is None else data_dir
     dates = pd.to_datetime(frame["Date"]).dt.normalize()
     cache = load_ibes(folder, dates.min(), dates.max(), ibes_features=wanted)
-    with _row_bar(len(cache)) as bar:
-        bar.update(len(cache))
     return asof_attach(
         frame,
         cache,
         features=wanted,
         date_column="Date",
         age_feature="days_since_est_update",
+        desc="ibes",
     )

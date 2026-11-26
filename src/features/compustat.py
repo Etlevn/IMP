@@ -18,7 +18,6 @@ from src.features.wrds_cache import (
     universe_hash,
     write_feature_cache,
 )
-from src.prepare import _row_bar
 
 ALL_COMPUSTAT = (
     "bm",
@@ -143,8 +142,13 @@ def _download_compustat_frame(
 
     df = df.sort_values(["gvkey", ASOF_COLUMN])
     g = df.groupby("gvkey", sort=False)
-    df["asset_growth"] = df["atq"] / g["atq"].shift(4) - 1.0
-    df["revenue_growth"] = df["saleq"] / g["saleq"].shift(4) - 1.0
+    # Prior-year level of 0 → NaN (avoid ±inf growth).
+    prev_atq = g["atq"].shift(4).replace(0, np.nan)
+    prev_sale = g["saleq"].shift(4).replace(0, np.nan)
+    asset_g = df["atq"] / prev_atq - 1.0
+    rev_g = df["saleq"] / prev_sale - 1.0
+    df["asset_growth"] = asset_g.where(np.isfinite(asset_g), np.nan)
+    df["revenue_growth"] = rev_g.where(np.isfinite(rev_g), np.nan)
     # Simple accruals: (ΔCA - ΔCash) - (ΔCL - ΔDebt) - Dep; without cash/debt detail use
     # (niq - oancfy) / atq as a coarse accrual proxy when oancfy present.
     df["accruals"] = (df["niq"] - df["oancfy"]) / df["atq"].replace(0, np.nan)
@@ -241,6 +245,6 @@ def attach_compustat(
     cache = load_compustat(
         folder, dates.min(), dates.max(), compustat_features=wanted
     )
-    with _row_bar(len(cache)) as bar:
-        bar.update(len(cache))
-    return asof_attach(frame, cache, features=wanted, date_column="Date")
+    return asof_attach(
+        frame, cache, features=wanted, date_column="Date", desc="compustat"
+    )

@@ -218,8 +218,7 @@ def build_event_table(
 
     rows: list[dict] = []
     groups = list(df_align.groupby("TickerId", sort=False))
-    n_events = int(df_align[EVENT_COLUMN].notna().sum())
-    with _row_bar(max(n_events, 1)) as bar:
+    with _row_bar(max(len(groups), 1), desc="events") as bar:
         for ticker, frame in groups:
             frame = frame.sort_values("Date").reset_index(drop=True)
             prices = frame[PRICE_COLUMN].to_numpy(dtype=float)
@@ -227,11 +226,9 @@ def build_event_table(
             sessions = pd.to_datetime(frame["Date"]).to_numpy()
             for announcement, anchor in _event_anchors(frame):
                 if anchor is None:
-                    bar.update(1)
                     continue
                 decision_at = anchor + DECISION_OFFSET
                 if decision_at < 0 or decision_at >= len(frame):
-                    bar.update(1)
                     continue
 
                 ret_ann = _window_return(prices, anchor, ANN_START_OFFSET, ANN_END_OFFSET)
@@ -285,7 +282,7 @@ def build_event_table(
                 if "Id" in frame.columns and pd.notna(release.get("Id")):
                     row["Id"] = release["Id"]
                 rows.append(row)
-                bar.update(1)
+            bar.update(1)
 
     df = pd.DataFrame(rows)
     if len(df):

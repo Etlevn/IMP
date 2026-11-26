@@ -107,7 +107,7 @@ def load_benchmark(folder: Path, ticker: str, start: pd.Timestamp, end: pd.Times
             and cached["Date"].max() >= end
         )
         if covers:
-            with _row_bar(len(cached)) as bar:
+            with _row_bar(len(cached), desc="benchmark") as bar:
                 bar.update(len(cached))
             return cached
     frame = _download_benchmark(ticker, start, end)
@@ -123,7 +123,7 @@ def load_benchmark(folder: Path, ticker: str, start: pd.Timestamp, end: pd.Times
         ticker=ticker,
         extra={"field": "Adj Close"},
     )
-    with _row_bar(len(frame)) as bar:
+    with _row_bar(len(frame), desc="benchmark") as bar:
         bar.update(len(frame))
     return frame
 
@@ -249,7 +249,7 @@ def attach_benchmark(
     else:
         prices = build_universe_index(frame, method)
         _write_benchmark_cache(folder, prices, source=method)
-        with _row_bar(len(prices)) as bar:
+        with _row_bar(len(prices), desc="benchmark") as bar:
             bar.update(len(prices))
 
     lookup = prices.set_index(pd.to_datetime(prices["Date"]).dt.normalize())["AdjClose"]

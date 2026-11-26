@@ -29,17 +29,18 @@ USD_CURRENCY_ID = 840
 _ROW_POS = 0
 
 
-def _row_bar(total: int) -> tqdm:
+def _row_bar(total: int, desc: str = "") -> tqdm:
+    label = f"{desc} " if desc and not desc.endswith(" ") else desc
     return tqdm(
         total=total,
         leave=False,
         position=_ROW_POS,
         dynamic_ncols=True,
-        desc="",
+        desc=label,
         unit="",
         miniters=1,
         mininterval=0,
-        bar_format="{bar}| {n_fmt}/{total_fmt}",
+        bar_format="{desc}{bar}| {n_fmt}/{total_fmt}",
     )
 
 
@@ -110,10 +111,10 @@ def sticky_model_bar(total: int) -> Iterator[tqdm | None]:
         yield bars[0] if bars else None
 
 
-def _read_parquet(path: Path) -> pd.DataFrame:
+def _read_parquet(path: Path, desc: str = "") -> pd.DataFrame:
     file = pq.ParquetFile(path)
     batches: list[pa.RecordBatch] = []
-    with _row_bar(file.metadata.num_rows) as bar:
+    with _row_bar(file.metadata.num_rows, desc=desc) as bar:
         for batch in file.iter_batches(batch_size=_CHUNK):
             batches.append(batch)
             bar.update(batch.num_rows)
@@ -124,18 +125,18 @@ def _read_parquet(path: Path) -> pd.DataFrame:
 
 def load_stock(data_dir: Path | None = None) -> pd.DataFrame:
     folder = DATA_DIR if data_dir is None else data_dir
-    stock = _read_parquet(folder / STOCK_FILE)
+    stock = _read_parquet(folder / STOCK_FILE, desc="stock")
     return stock[stock["CurrencyId"] == USD_CURRENCY_ID].reset_index(drop=True)
 
 
 def load_earnings(data_dir: Path | None = None) -> pd.DataFrame:
     folder = DATA_DIR if data_dir is None else data_dir
-    return _read_parquet(folder / EARNINGS_FILE)
+    return _read_parquet(folder / EARNINGS_FILE, desc="earnings")
 
 
 def load_sentiment(data_dir: Path | None = None) -> pd.DataFrame:
     folder = DATA_DIR if data_dir is None else data_dir
-    sentiment = _read_parquet(folder / SENTIMENT_FILE)
+    sentiment = _read_parquet(folder / SENTIMENT_FILE, desc="sentiment")
     sentiment["date"] = pd.to_datetime(sentiment["date"])
     sentiment = sentiment.drop_duplicates(["symbol", "date"], keep="last")
     sentiment["symbol"] = sentiment["symbol"].astype("string")
@@ -162,18 +163,29 @@ def _merge_sentiment(
     ratings = ratings.drop_duplicates(["symbol", "date"], keep="last")
     ratings = ratings.sort_values("date")
 
-    ordered = frame.sort_values("Date")
-    merged = pd.merge_asof(
-        ordered,
-        ratings,
-        left_on="Date",
-        right_on="date",
-        left_by="Symbol",
-        right_by="symbol",
-        direction="backward",
-        tolerance=pd.Timedelta(days=tolerance_days),
+    parts: list[pd.DataFrame] = []
+    with _row_bar(len(frame), desc="ratings") as bar:
+        for start in range(0, len(frame), _CHUNK):
+            chunk = frame.iloc[start : start + _CHUNK]
+            ordered = chunk.sort_values("Date")
+            merged = pd.merge_asof(
+                ordered,
+                ratings,
+                left_on="Date",
+                right_on="date",
+                left_by="Symbol",
+                right_by="symbol",
+                direction="backward",
+                tolerance=pd.Timedelta(days=tolerance_days),
+            )
+            parts.append(merged)
+            bar.update(len(chunk))
+    return (
+        pd.concat(parts, ignore_index=True)
+        .sort_values("_row")
+        .drop(columns="_row")
+        .reset_index(drop=True)
     )
-    return merged.sort_values("_row").drop(columns="_row").reset_index(drop=True)
 
 
 def merge_panel(
@@ -186,7 +198,7 @@ def merge_panel(
     earnings["EventDate"] = pd.to_datetime(earnings["EventDate"])
 
     parts: list[pd.DataFrame] = []
-    with _row_bar(len(stock_data)) as bar:
+    with _row_bar(len(stock_data), desc="earnings+") as bar:
         for start in range(0, len(stock_data), _CHUNK):
             chunk = stock_data.iloc[start : start + _CHUNK]
             parts.append(

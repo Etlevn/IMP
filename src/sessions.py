@@ -149,7 +149,7 @@ def align_trading_sessions(panel: pd.DataFrame, earnings: pd.DataFrame) -> pd.Da
     if panel.empty:
         return panel.reindex(columns=panel.columns)
     groups = list(panel.groupby("TickerId", sort=False))
-    with _row_bar(len(panel)) as bar:
+    with _row_bar(len(panel), desc="sessions") as bar:
         for _ticker, frame in groups:
             frame = frame.copy()
             frame["Date"] = pd.to_datetime(frame["Date"]).dt.normalize()

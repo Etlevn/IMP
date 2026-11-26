@@ -57,11 +57,30 @@ from src.train import FamilyName, FamilySpec, get_family_spec
 
 # Fixed models. Comment out a family or sub-model to skip it.
 MODELS: dict[str, tuple[str, ...]] = {
-    "lin": ("ols",),  # also: ridge, lasso, elasticnet, huber, quantile
-    "tr": ("decision_tree", "random_forest", "hist_gradient_boosting"),
-    # also: lightgbm, xgboost, catboost
-    "nn": ("mlp_shallow", "mlp", "mlp_deep"),
-    # also: mlp_dropout, wide_deep, ft_transformer
+    "lin": (
+        "ols",
+        "ridge",
+        "lasso",
+        "elasticnet",
+        "huber",
+        "quantile",
+    ),
+    "tr": (
+        "decision_tree",
+        "random_forest",
+        "hist_gradient_boosting",
+        "lightgbm",
+        "xgboost",
+        "catboost",
+    ),
+    "nn": (
+        "mlp_shallow",
+        "mlp",
+        "mlp_deep",
+        "mlp_dropout",
+        "wide_deep",
+        "ft_transformer",
+    ),
 }
 
 # Which feat_filter ``suggest`` labels enter the pool after FEATURE_WHITELIST.
@@ -80,10 +99,10 @@ GAP_MODE: str = "abs"
 GAP_PENALTY = 1.0
 
 # Optuna trials per model when the searchable pool is larger than EXHAUSTIVE_MAX.
-N_TRIALS = 120
+N_TRIALS = 2048
 
 # If len(searchable) <= this, enumerate all subsets instead of Optuna (2^n-1 subsets).
-EXHAUSTIVE_MAX = 8
+EXHAUSTIVE_MAX = 12
 
 # True: write output/feat_optuna_trial.csv (all trials). False: skip it.
 SAVE_TRIALS = False
