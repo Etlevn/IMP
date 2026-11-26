@@ -14,13 +14,15 @@ validation fold, with optional train/val gap via ``GAP_MODE`` /
 ``GAP_PENALTY`` (test never enters selection). When the searchable pool
 is at most ``EXHAUSTIVE_MAX``, all non-empty subsets are enumerated;
 otherwise Optuna TPE runs ``N_TRIALS`` trials.
-Artifacts: ``output/feat_optuna.csv`` (per-model best), optional
-``output/feat_optuna_trial.csv`` when ``SAVE_TRIALS``, plus
-``output/config_optuna.json``. Does not modify ``main.py`` outputs.
+Artifacts: ``output/feat_optuna.csv`` is rewritten after each model with
+that model's best row (so a crash still keeps finished models); optional
+``output/feat_optuna_trial.csv`` when ``SAVE_TRIALS`` (appended per model);
+plus ``output/config_optuna.json``. Does not modify ``main.py`` outputs.
 """
 
 from __future__ import annotations
 
+import gc
 from dataclasses import replace
 from pathlib import Path
 
@@ -41,6 +43,7 @@ from src.metrics import SUMMARY_METRIC_COLUMNS
 from src.optuna_search import (
     OBJECTIVE_CHOICES,
     SELECTION_SCORE_COLUMN,
+    BoundedPreprocessCache,
     build_search_pool,
     mark_best_per_model,
     normalize_gap_mode,
@@ -63,37 +66,37 @@ MODELS: dict[str, tuple[str, ...]] = {
         "lasso",
         "elasticnet",
         "huber",
-        "quantile",
+        # "quantile",
     ),
-    "tr": (
-        "decision_tree",
-        "random_forest",
-        "hist_gradient_boosting",
-        "lightgbm",
-        "xgboost",
-        "catboost",
-    ),
-    "nn": (
-        "mlp_shallow",
-        "mlp",
-        "mlp_deep",
-        "mlp_dropout",
-        "wide_deep",
-        "ft_transformer",
-    ),
+    # "tr": (
+    #     "decision_tree",
+    #     "random_forest",
+    #     "hist_gradient_boosting",
+    #     "lightgbm",
+    #     "xgboost",
+    #     "catboost",
+    # ),
+    # "nn": (
+    #     "mlp_shallow",
+    #     "mlp",
+    #     "mlp_deep",
+    #     "mlp_dropout",
+    #     "wide_deep",
+    #     "ft_transformer",
+    #),
 }
 
 # Which feat_filter ``suggest`` labels enter the pool after FEATURE_WHITELIST.
-INCLUDE_SUGGEST: list[str] = ["keep", "weak","noise"]    # ["keep", "weak", "noise", "redundant", "drop"]
+INCLUDE_SUGGEST: list[str] = ["keep", "weak", "noise"]    # ["keep", "weak", "noise", "redundant", "drop"]
 
 # Validation metric inside the selection score. One of: "oos_r2" | "rank_ic" | "quintile_ls".
-OBJECTIVE: str = "oos_r2"
+OBJECTIVE: str = "rank_ic"
 
 # How train/val enter selection_score. One of:
 #   "none" → pure val (GAP_PENALTY ignored)
 #   "abs"  → val - GAP_PENALTY * |train - val|
 #   "pos"  → val - GAP_PENALTY * max(0, val - train)
-GAP_MODE: str = "abs"
+GAP_MODE: str = "none"
 
 # Gap weight for "abs" / "pos". Allowed: float >= 0.
 GAP_PENALTY = 1.0
@@ -106,6 +109,9 @@ EXHAUSTIVE_MAX = 12
 
 # True: write output/feat_optuna_trial.csv (all trials). False: skip it.
 SAVE_TRIALS = False
+
+# Cap cached preprocess results (LRU). Cleared after each model + gc.
+PREPROCESS_CACHE_MAX = 64
 
 FILTER_PATH = OUTPUT_DIR / "feat_filter.csv"
 
@@ -198,6 +204,7 @@ def _snapshot(*, shared: dict) -> dict:
         "n_trials": N_TRIALS,
         "exhaustive_max": EXHAUSTIVE_MAX,
         "save_trials": bool(SAVE_TRIALS),
+        "preprocess_cache_max": int(PREPROCESS_CACHE_MAX),
         "include_suggest": list(INCLUDE_SUGGEST),
         "feature_whitelist": list(FEATURE_WHITELIST),
         "feature_blacklist": list(FEATURE_BLACKLIST),
@@ -261,8 +268,13 @@ def main() -> None:
     pairs = _selected_specs()
     events = _load_events(list(catalog))
 
-    preprocess_cache: dict = {}
-    blocks: list[pd.DataFrame] = []
+    if int(PREPROCESS_CACHE_MAX) < 1:
+        raise ValueError(
+            f"PREPROCESS_CACHE_MAX must be >= 1; got {PREPROCESS_CACHE_MAX!r}."
+        )
+    preprocess_cache: BoundedPreprocessCache = BoundedPreprocessCache(
+        PREPROCESS_CACHE_MAX
+    )
     first_spec = pairs[0][0]
     shared = {
         "TARGET": first_spec.config.TARGET,
@@ -279,6 +291,32 @@ def main() -> None:
     trial_total = planned_trial_count(
         pool, n_trials=N_TRIALS, exhaustive_max=EXHAUSTIVE_MAX
     )
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    trial_path = Path(OUTPUT_DIR) / "feat_optuna_trial.csv"
+    best_path = Path(OUTPUT_DIR) / "feat_optuna.csv"
+    config_path = Path(OUTPUT_DIR) / "config_optuna.json"
+    write_compact_json(config_path, _snapshot(shared=shared))
+    stale_best = Path(OUTPUT_DIR) / "feat_optuna_best.csv"
+    if stale_best.exists():
+        stale_best.unlink()
+    # Fresh run: clear previous best / trial artifacts before streaming rows.
+    if best_path.exists():
+        best_path.unlink()
+    if SAVE_TRIALS and trial_path.exists():
+        trial_path.unlink()
+
+    best_rows: list[pd.DataFrame] = []
+    best_cols: list[str] | None = None
+    sort_col = OBJECTIVE  # test column matching the val OBJECTIVE (display only)
+    required = (
+        "n_val",
+        train_column(OBJECTIVE),
+        objective_column(OBJECTIVE),
+        SELECTION_SCORE_COLUMN,
+        sort_col,
+    )
+
     with sticky_stack((len(pairs), max(trial_total, 1))) as (model_bar, trial_bar):
         for spec, model_type in pairs:
             if model_bar is not None:
@@ -300,47 +338,54 @@ def main() -> None:
                 trial_bar=trial_bar,
                 preprocess_cache=preprocess_cache,
             )
-            blocks.append(block)
+            marked = mark_best_per_model(block, objective=OBJECTIVE)
+            missing = [col for col in required if col not in marked.columns]
+            if missing:
+                raise ValueError(
+                    f"metrics missing columns for best table: {missing}."
+                )
+            if best_cols is None:
+                best_cols = [
+                    col for col in _best_columns(OBJECTIVE) if col in marked.columns
+                ]
+            row = marked.loc[marked["best"] == 1, best_cols]
+            if len(row) != 1:
+                raise RuntimeError(
+                    f"Expected exactly one best row for model {model_type!r}; "
+                    f"got {len(row)}."
+                )
+            best_rows.append(row)
+            best = (
+                pd.concat(best_rows, axis=0, ignore_index=True)
+                .sort_values(
+                    sort_col, ascending=False, na_position="last", kind="mergesort"
+                )
+                .reset_index(drop=True)
+            )
+            best.to_csv(best_path, index=False, float_format="%.4f")
+
+            if SAVE_TRIALS:
+                marked.to_csv(
+                    trial_path,
+                    mode="a",
+                    header=not trial_path.exists(),
+                    index=False,
+                    float_format="%.4f",
+                )
+
+            # Drop retained preprocess frames before the next model.
+            preprocess_cache.clear()
+            gc.collect()
             if model_bar is not None:
                 model_bar.update(1)
 
-    metrics = mark_best_per_model(
-        pd.concat(blocks, axis=0, ignore_index=True),
-        objective=OBJECTIVE,
-    )
-    best_cols = [col for col in _best_columns(OBJECTIVE) if col in metrics.columns]
-    missing = [
-        col
-        for col in (
-            "n_val",
-            train_column(OBJECTIVE),
-            objective_column(OBJECTIVE),
-            SELECTION_SCORE_COLUMN,
-        )
-        if col not in metrics.columns
-    ]
-    if missing:
-        raise ValueError(f"metrics missing columns for best table: {missing}.")
-    sort_col = OBJECTIVE  # test column matching the val OBJECTIVE (display only)
-    if sort_col not in metrics.columns:
-        raise ValueError(f"metrics missing test column {sort_col!r} for OBJECTIVE.")
+    if not best_rows or best_cols is None:
+        raise RuntimeError("No models produced best rows.")
     best = (
-        metrics.loc[metrics["best"] == 1, best_cols]
+        pd.concat(best_rows, axis=0, ignore_index=True)
         .sort_values(sort_col, ascending=False, na_position="last", kind="mergesort")
         .reset_index(drop=True)
     )
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    trial_path = Path(OUTPUT_DIR) / "feat_optuna_trial.csv"
-    best_path = Path(OUTPUT_DIR) / "feat_optuna.csv"
-    config_path = Path(OUTPUT_DIR) / "config_optuna.json"
-    if SAVE_TRIALS:
-        metrics.to_csv(trial_path, index=False, float_format="%.4f")
-    best.to_csv(best_path, index=False, float_format="%.4f")
-    write_compact_json(config_path, _snapshot(shared=shared))
-    stale_best = Path(OUTPUT_DIR) / "feat_optuna_best.csv"
-    if stale_best.exists():
-        stale_best.unlink()
 
     display = best.copy()
     format_cols = (

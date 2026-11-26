@@ -75,8 +75,8 @@ def sticky_stack(totals: Sequence[int]) -> Iterator[tuple[tqdm | None, ...]]:
                 dynamic_ncols=True,
                 desc="",
                 miniters=1,
-                mininterval=0,
-                bar_format="{desc}{bar}| {n_fmt}/{total_fmt}",
+                mininterval=0.1,
+                bar_format="{desc}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
             )
         )
     _ROW_POS = previous_row + n

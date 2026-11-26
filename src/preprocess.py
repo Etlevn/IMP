@@ -124,7 +124,9 @@ def fit_preprocessor(
             f"IMPUTE_STRATEGY must be one of {sorted(ALLOWED_IMPUTE, key=lambda x: str(x))}."
         )
 
-    frame = train[feature_columns]
+    frame = train[feature_columns].copy()
+    for column in feature_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
     if impute_strategy == "drop":
         frame = frame.dropna()
         if len(frame) == 0:
@@ -145,7 +147,7 @@ def fit_preprocessor(
     mean = None
     scale = None
     if standardize:
-        values = frame.copy()
+        values = frame
         if fill_values is not None:
             values = values.fillna(fill_values)
         mean = values.mean(numeric_only=True).reindex(feature_columns)

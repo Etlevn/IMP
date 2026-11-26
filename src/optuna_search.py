@@ -3,12 +3,51 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Sequence
+from collections import OrderedDict
+from collections.abc import MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+
+class BoundedPreprocessCache(MutableMapping[Any, Any]):
+    """LRU map that caps preprocess retention during Optuna / exhaustive search.
+
+    Each cached ``PreprocessResult`` holds train/val/test frames; without a
+    bound, unique feature subsets accumulate until the process is OOM-killed.
+    """
+
+    def __init__(self, maxsize: int) -> None:
+        if int(maxsize) < 1:
+            raise ValueError(f"maxsize must be >= 1; got {maxsize!r}.")
+        self.maxsize = int(maxsize)
+        self._data: OrderedDict[Any, Any] = OrderedDict()
+
+    def __getitem__(self, key: Any) -> Any:
+        value = self._data[key]
+        self._data.move_to_end(key)
+        return value
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if key in self._data:
+            self._data.move_to_end(key)
+        self._data[key] = value
+        while len(self._data) > self.maxsize:
+            self._data.popitem(last=False)
+
+    def __delitem__(self, key: Any) -> None:
+        del self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def clear(self) -> None:
+        self._data.clear()
 
 from feat_filter import SUGGEST_LABELS
 from src.pipeline import score_feature_subset

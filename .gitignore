@@ -10,3 +10,4 @@ __pycache__/
 *.py[cod]
 docs/superpowers/
 tests/
+tmp/

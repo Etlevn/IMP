@@ -105,10 +105,17 @@ def select_alpha_on_val(
             random_state=random_state,
         )
         fit_linear_model(model, X_train, y_train)
+        y_hat = predict_linear(model, X_val)
         metrics = evaluate_regression(
             y_val,
-            predict_linear(model, X_val),
+            y_hat,
             train_y_mean=train_mean,
+        )
+        # All-zero L1 solutions yield constant preds and meaningless IC; deprioritize.
+        finite = np.asarray(y_hat, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        degenerate = float(
+            finite.size <= 1 or np.unique(finite).size <= 1
         )
         rows.append(
             {
@@ -117,12 +124,14 @@ def select_alpha_on_val(
                 "val_mae": metrics["mae"],
                 "val_ic": metrics["ic"],
                 "val_oos_r2": metrics["oos_r2"],
+                "degenerate": degenerate,
             }
         )
     table = pd.DataFrame(rows)
-    # Prefer highest OOS R²; break ties with lower RMSE.
+    # Prefer non-degenerate fits, then highest OOS R², then lower RMSE.
     table = table.sort_values(
-        ["val_oos_r2", "val_rmse"], ascending=[False, True]
+        ["degenerate", "val_oos_r2", "val_rmse"],
+        ascending=[True, False, True],
     ).reset_index(drop=True)
     best_alpha = float(table.loc[0, "alpha"])
     return best_alpha, table

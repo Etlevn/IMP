@@ -41,8 +41,10 @@ LINEAR_MODEL_TYPES = (
 ALPHA = 1.0
 
 # Candidate alphas tuned on validation only (ridge/lasso/elasticnet/huber/quantile).
+# Smaller end needed for L1 models (lasso/quantile) on standardized features +
+# small return targets; larger end still covers ridge/huber shrinkage.
 # Allowed: non-empty sequence of floats > 0, or () to use ALPHA as-is.
-ALPHA_GRID = (0.01, 0.1, 1.0, 10.0, 100.0)
+ALPHA_GRID = (1e-4, 1e-3, 1e-2, 0.1, 1.0, 10.0, 100.0)
 
 # ElasticNet mixing parameter (fixed this round; not grid-searched).
 # Allowed: float in (0, 1].
