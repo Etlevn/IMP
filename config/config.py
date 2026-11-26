@@ -80,11 +80,22 @@ MACRO_FEATURES = {
     "vnq": "VNQ",
 }
 
-# Allowed: mom_21d | vol_21d | log_mcap | par_mkt (src/features/engineered.py).
-# par_mkt is the reversal-comparison window: close at anchor−5 through close at anchor−2, stock minus benchmark, stored on the decision-day row.
+# Allowed engineered names (src/features/engineered.py).
+# par_mkt: close at anchor−5 through close at anchor−2, stock minus benchmark, on decision row.
 ENGINEERED_FEATURES = [
+    "mom_5d",
     "mom_21d",
+    "mom_63d",
+    "vol_5d",
     "vol_21d",
+    "vol_63d",
+    "rel_vol_21d",
+    "amihud_21d",
+    "hl_range_21d",
+    "gap_1d",
+    "mom_exmkt_5d",
+    "mom_exmkt_21d",
+    "mom_exmkt_63d",
     "log_mcap",
     "par_mkt",
 ]

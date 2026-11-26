@@ -44,7 +44,7 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 | `stock_universe.csv`                     | One row per `TickerId` for WRDS / external data mapping (see below) |
 | `benchmark_spy.parquet` / `.json`        | Optional Yahoo SPY cache (when `BENCHMARK_SOURCE=yahoo`) |
 | `benchmark_equal|cap.parquet` / `.json`  | Optional universe-index cache (when `BENCHMARK_SOURCE=equal|cap`) |
-| `macro_daily.parquet` / `.json`          | Optional Yahoo macro cache (`MACRO_FEATURES`: vix / tnx / dxy) |
+| `macro_daily.parquet` / `.json`          | Optional Yahoo macro cache (`MACRO_FEATURES`: 15 Close levels) |
 
 Sample panel used in development: on the order of **~200 U.S. names** with price dates **2020–2024** (ticker/symbol counts are not exact equals; see `docs/dataset.md`). Stock returns use `LastPrice` (adjustment convention not stated in-file).
 

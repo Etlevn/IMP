@@ -5,7 +5,7 @@ panel. Everything else is created here and switched on from ``config.config``:
 
 - ``analyst``: Coverage, BuyRatio, SellRatio, RatingScore
 - ``macro``: Yahoo daily levels such as vix, tnx, dxy
-- ``engineered``: mom_21d, vol_21d, log_mcap, par_mkt
+- ``engineered``: multi-window mom/vol, rel_vol/amihud/range/gap, mom_exmkt_*, log_mcap, par_mkt
 
 Comment out a name in the matching config group to disable it. The event table
 that consumes these columns lives in ``src.events``.

@@ -50,18 +50,35 @@ Yahoo daily close, left-merged on `Date` in `src/features/macro.py`. Cached unde
 | Feature | Definition | Note |
 | --- | --- | --- |
 | `vix` | Close of `^VIX`. | CBOE volatility index level. |
-| `tnx` | Close of `^TNX`. | Yahoo 10-year Treasury yield field. |
-| `dxy` | Close of `DX-Y.NYB`. | U.S. dollar index level. |
+| `tnx` | Close of `^TNX`. | 10-year Treasury yield. |
+| `dxy` | Close of `DX-Y.NYB`. | U.S. dollar index. |
+| `spy` | Close of `SPY`. | S&P 500 ETF. |
+| `qqq` | Close of `QQQ`. | Nasdaq-100 ETF. |
+| `iwm` | Close of `IWM`. | Russell 2000 ETF. |
+| `irx` | Close of `^IRX`. | 13-week T-bill yield. |
+| `hyg` | Close of `HYG`. | High-yield corporate bond ETF. |
+| `oil` | Close of `CL=F`. | WTI crude futures. |
+| `gold` | Close of `GC=F`. | Gold futures. |
+| `tyx` | Close of `^TYX`. | 30-year Treasury yield. |
+| `lqd` | Close of `LQD`. | Investment-grade corporate bond ETF. |
+| `copper` | Close of `HG=F`. | Copper futures. |
+| `move` | Close of `^MOVE`. | ICE BofA MOVE rate-vol index. |
+| `vnq` | Close of `VNQ`. | U.S. REIT ETF. |
 
 ## Engineered
 
-Built in `src/features/engineered.py` from prices, market cap, and the benchmark. Windows use trading days within each `TickerId`. No row uses a later close.
+Built in `src/features/engineered.py` from prices, volume, market cap, and the benchmark. Windows use trading days within each `TickerId`. No row uses a later close.
 
 | Feature | Definition | Note |
 | --- | --- | --- |
-| `mom_21d` | `LastPrice` percent change over 21 trading days. | Same-name history only. |
-| `vol_21d` | Sample standard deviation (`ddof=1`) of 21 daily simple returns. | Needs 21 returns; earlier rows are missing. |
+| `mom_5d` / `mom_21d` / `mom_63d` | `LastPrice` percent change over W trading days. | Same-name history only. |
+| `vol_5d` / `vol_21d` / `vol_63d` | Sample std (`ddof=1`) of W daily simple returns. | Needs a full W-return window. |
+| `rel_vol_21d` | `Volume` / mean volume of the **prior 21** trading days (**excludes today**). | Missing until 21 prior days exist. |
+| `amihud_21d` | 21-day mean of `|ret_1d| / (LastPrice * Volume)`. | Non-positive dollar volume → missing that day. |
+| `hl_range_21d` | 21-day mean of `(High - Low) / LastPrice`. | Uses session high/low. |
+| `gap_1d` | `(Open - previous close) / previous close`. | First row per ticker missing. |
+| `mom_exmkt_5d` / `mom_exmkt_21d` / `mom_exmkt_63d` | Stock W-day return minus same-window `BenchmarkAdjClose` return. | Requires benchmark attach first. |
 | `log_mcap` | Natural log of `MarketCap`. | Missing when market cap is missing or not positive. |
 | `par_mkt` | Stock return from the close at `AnchorDate−5` to the close at `AnchorDate−2`, minus the benchmark return over that same window. | Stored only on the decision row (`AnchorDate−2`). Same pre-announcement window as the reversal comparison. |
 
-`par_mkt` uses `BenchmarkAdjClose`. That series is the configured benchmark (`BENCHMARK_SOURCE`: `equal`, `cap`, or Yahoo `MARKET_TICKER`), not a fixed SPY series. The default in `config/config.py` is `equal`.
+`par_mkt` and `mom_exmkt_*` use `BenchmarkAdjClose`. That series is the configured benchmark (`BENCHMARK_SOURCE`: `equal`, `cap`, or Yahoo `MARKET_TICKER`), not a fixed SPY series. The default in `config/config.py` is `equal`.
