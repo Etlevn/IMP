@@ -141,6 +141,10 @@ COMPUSTAT_FEATURES = [
 #          ret_post | ret_post_mkt | dir_ann | vol_ann | vol_post
 TARGET = "ret_ann_mkt"  # "ret_ann"
 
+# Val metric for main.py inner HP grids / early stopping, and the default to keep aligned with feat_optuna.OBJECTIVE (edit both when changing).
+# One of: "oos_r2" | "rank_ic" | "quintile_ls".
+OBJECTIVE = "rank_ic"
+
 # Forced into feat_optuna's search pool before feat_filter suggest labels.
 # Must be a subset of enabled_features(). Empty = no whitelist.
 FEATURE_WHITELIST = []

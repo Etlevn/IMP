@@ -10,7 +10,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.metrics import evaluate_regression
+from src.metrics import (
+    is_tuning_improvement,
+    normalize_tuning_objective,
+    regression_tuning_metrics,
+    tuning_metric_value,
+)
 
 # Harmonize with GBDT OpenMP runtimes in the same process.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -175,8 +180,10 @@ def fit_torch_regressor(
     max_epochs: int = 200,
     early_stopping_patience: int = 8,
     random_state: int = 42,
+    objective: str = "oos_r2",
 ) -> TorchBundle:
-    """Train with Adam; early-stop on chronological val ``oos_r2``."""
+    """Train with Adam; early-stop on chronological val ``objective``."""
+    objective = normalize_tuning_objective(objective)
     torch, _ = _require_torch()
     torch.manual_seed(int(random_state))
     if hasattr(torch, "use_deterministic_algorithms"):
@@ -193,7 +200,8 @@ def fit_torch_regressor(
     )
     X_va = X_val.to_numpy(dtype=np.float32)
     y_va = np.asarray(y_val, dtype=float)
-    train_mean = float(np.asarray(y_train, dtype=float).mean())
+    y_tr_np = np.asarray(y_train, dtype=float)
+    train_mean = float(y_tr_np.mean())
 
     optimizer = torch.optim.Adam(
         module.parameters(), lr=float(learning_rate), weight_decay=float(weight_decay)
@@ -202,7 +210,7 @@ def fit_torch_regressor(
     n = int(X_tr.shape[0])
     bs = max(1, min(int(batch_size), n))
 
-    best_oos = float("-inf")
+    best_metric = float("-inf")
     best_rmse = float("inf")
     best_epoch = 1
     best_state = deepcopy(module.state_dict())
@@ -221,18 +229,25 @@ def fit_torch_regressor(
 
         module.eval()
         with torch.no_grad():
+            train_pred = module(X_tr).detach().cpu().numpy()
             val_pred = (
                 module(torch.as_tensor(X_va, device=device)).detach().cpu().numpy()
             )
-        metrics = evaluate_regression(y_va, val_pred, train_y_mean=train_mean)
-        oos = float(metrics["oos_r2"])
-        rmse = float(metrics["rmse"])
-        improved = oos > best_oos + 1e-12 or (
-            np.isclose(oos, best_oos) and rmse < best_rmse
+        metrics = regression_tuning_metrics(
+            y_tr_np,
+            train_pred,
+            y_va,
+            val_pred,
+            train_y_mean=train_mean,
         )
-        if improved:
-            best_oos = oos
-            best_rmse = rmse
+        if is_tuning_improvement(
+            metrics,
+            best_metric=best_metric,
+            best_rmse=best_rmse,
+            objective=objective,
+        ):
+            best_metric = tuning_metric_value(metrics, objective)
+            best_rmse = float(metrics["val_rmse"])
             best_epoch = epoch
             best_state = deepcopy(module.state_dict())
             stale = 0

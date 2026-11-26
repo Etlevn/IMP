@@ -50,10 +50,11 @@ class BoundedPreprocessCache(MutableMapping[Any, Any]):
         self._data.clear()
 
 from feat_filter import SUGGEST_LABELS
+from src.metrics import TUNING_OBJECTIVE_CHOICES, normalize_tuning_objective
 from src.pipeline import score_feature_subset
 from src.train import FamilySpec
 
-OBJECTIVE_CHOICES: tuple[str, ...] = ("oos_r2", "rank_ic", "quintile_ls")
+OBJECTIVE_CHOICES: tuple[str, ...] = TUNING_OBJECTIVE_CHOICES
 # none = pure val; abs = λ·|train−val|; pos = λ·max(0, val−train).
 GAP_MODE_CHOICES: tuple[str, ...] = ("none", "abs", "pos")
 SELECTION_SCORE_COLUMN = "selection_score"
@@ -61,22 +62,12 @@ SELECTION_SCORE_COLUMN = "selection_score"
 
 def objective_column(objective: str) -> str:
     """Map a public OBJECTIVE name to the val column used for reporting."""
-    name = str(objective).strip()
-    if name not in OBJECTIVE_CHOICES:
-        raise ValueError(
-            f"Unknown OBJECTIVE={objective!r}; expected one of {OBJECTIVE_CHOICES}."
-        )
-    return f"val_{name}"
+    return f"val_{normalize_tuning_objective(objective)}"
 
 
 def train_column(objective: str) -> str:
     """Map a public OBJECTIVE name to the train-fold column."""
-    name = str(objective).strip()
-    if name not in OBJECTIVE_CHOICES:
-        raise ValueError(
-            f"Unknown OBJECTIVE={objective!r}; expected one of {OBJECTIVE_CHOICES}."
-        )
-    return f"train_{name}"
+    return f"train_{normalize_tuning_objective(objective)}"
 
 
 def normalize_gap_mode(gap_mode: str) -> str:
@@ -346,6 +337,7 @@ def run_model_search(
             feature_columns=columns,
             events=events,
             preprocess_cache=cache,
+            objective=objective,
         )
         row = _trial_row(
             family=family,

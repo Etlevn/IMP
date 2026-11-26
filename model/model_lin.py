@@ -16,7 +16,11 @@ from sklearn.linear_model import (
     Ridge,
 )
 
-from src.metrics import evaluate_regression
+from src.metrics import (
+    normalize_tuning_objective,
+    pick_tuning_row,
+    regression_tuning_metrics,
+)
 
 ALLOWED_LINEAR_TYPES = frozenset(
     {"ols", "ridge", "lasso", "logistic", "elasticnet", "huber", "quantile"}
@@ -86,12 +90,15 @@ def select_alpha_on_val(
     default_alpha: float,
     l1_ratio: float = 0.5,
     random_state: int = 42,
+    objective: str = "oos_r2",
 ) -> tuple[float, pd.DataFrame]:
-    """Pick alpha on validation by maximizing ``oos_r2`` (fallback: min RMSE).
+    """Pick alpha on validation by maximizing ``objective`` (then min RMSE).
 
+    ``objective`` is one of ``oos_r2`` | ``rank_ic`` | ``quintile_ls``.
     Returns ``(best_alpha, tuning_table)``. For non-tunable models, returns
     ``default_alpha`` and an empty table.
     """
+    objective = normalize_tuning_objective(objective)
     if model_type not in ALPHA_TUNABLE_TYPES or not alpha_grid:
         return float(default_alpha), pd.DataFrame()
 
@@ -105,14 +112,17 @@ def select_alpha_on_val(
             random_state=random_state,
         )
         fit_linear_model(model, X_train, y_train)
-        y_hat = predict_linear(model, X_val)
-        metrics = evaluate_regression(
+        y_hat_train = predict_linear(model, X_train)
+        y_hat_val = predict_linear(model, X_val)
+        metrics = regression_tuning_metrics(
+            y_train,
+            y_hat_train,
             y_val,
-            y_hat,
+            y_hat_val,
             train_y_mean=train_mean,
         )
         # All-zero L1 solutions yield constant preds and meaningless IC; deprioritize.
-        finite = np.asarray(y_hat, dtype=float)
+        finite = np.asarray(y_hat_val, dtype=float)
         finite = finite[np.isfinite(finite)]
         degenerate = float(
             finite.size <= 1 or np.unique(finite).size <= 1
@@ -120,18 +130,12 @@ def select_alpha_on_val(
         rows.append(
             {
                 "alpha": float(alpha),
-                "val_rmse": metrics["rmse"],
-                "val_mae": metrics["mae"],
-                "val_ic": metrics["ic"],
-                "val_oos_r2": metrics["oos_r2"],
+                **metrics,
                 "degenerate": degenerate,
             }
         )
-    table = pd.DataFrame(rows)
-    # Prefer non-degenerate fits, then highest OOS R², then lower RMSE.
-    table = table.sort_values(
-        ["degenerate", "val_oos_r2", "val_rmse"],
-        ascending=[True, False, True],
-    ).reset_index(drop=True)
+    table = pick_tuning_row(
+        pd.DataFrame(rows), objective, prefer_non_degenerate=True
+    )
     best_alpha = float(table.loc[0, "alpha"])
     return best_alpha, table

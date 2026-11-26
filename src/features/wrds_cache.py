@@ -39,13 +39,15 @@ def write_feature_cache(
     universe_hash_value: str,
     query_fingerprint: str,
     extra_meta: dict[str, Any] | None = None,
+    extra_columns: Sequence[str] = (),
 ) -> tuple[Path, Path]:
     if frame is None or len(frame) == 0:
         raise RuntimeError(
             f"Refusing to write empty {stem} feature cache. "
             "WRDS pull returned no rows."
         )
-    required = {TICKER_COLUMN, ASOF_COLUMN, *features}
+    extras = list(extra_columns)
+    required = {TICKER_COLUMN, ASOF_COLUMN, *features, *extras}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"{stem} cache frame missing columns: {missing}")
@@ -55,13 +57,14 @@ def write_feature_cache(
     out = frame.copy()
     out[ASOF_COLUMN] = pd.to_datetime(out[ASOF_COLUMN]).dt.normalize()
     out = out.sort_values([TICKER_COLUMN, ASOF_COLUMN]).reset_index(drop=True)
-    cols = [TICKER_COLUMN, ASOF_COLUMN, *list(features)]
+    cols = [TICKER_COLUMN, ASOF_COLUMN, *list(features), *extras]
     out.loc[:, cols].to_parquet(path, index=False)
 
     meta: dict[str, Any] = {
         "source": "wrds",
         "stem": stem,
         "features": list(features),
+        "extra_columns": extras,
         "universe_hash": universe_hash_value,
         "query_fingerprint": query_fingerprint,
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -84,10 +87,12 @@ def load_cached_or_raise(
     features: Sequence[str],
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
+    extra_columns: Sequence[str] = (),
 ) -> pd.DataFrame:
     """Attach-path loader: cache only. Tell user which fetch script to run."""
     wanted = list(features)
-    if not wanted:
+    extras = list(extra_columns)
+    if not wanted and not extras:
         return pd.DataFrame(columns=[TICKER_COLUMN, ASOF_COLUMN])
 
     path, meta_path = cache_paths(folder, stem)
@@ -111,7 +116,7 @@ def load_cached_or_raise(
     if len(frame) == 0:
         raise RuntimeError(f"{stem} feature cache is empty: {path}. Re-run: python {script}")
 
-    need_cols = [TICKER_COLUMN, ASOF_COLUMN, *wanted]
+    need_cols = [TICKER_COLUMN, ASOF_COLUMN, *wanted, *extras]
     missing_cols = [c for c in need_cols if c not in frame.columns]
     if missing_cols:
         raise ValueError(f"{stem} parquet missing columns: {missing_cols}")

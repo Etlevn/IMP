@@ -36,7 +36,8 @@ class FitBundle:
     summary_extras: dict[str, float | int | str] = field(default_factory=dict)
 
 
-FitOneFn = Callable[[str, PreprocessResult], FitBundle]
+# (model_type, preprocess_result, tune_objective) -> fitted bundle
+FitOneFn = Callable[[str, PreprocessResult, str], FitBundle]
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,8 @@ def fit_lin(
     model_type: str,
     result: PreprocessResult,
     config: ModuleType | None = None,
+    *,
+    objective: str = "oos_r2",
 ) -> FitBundle:
     if config is None:
         import config.config_lin as config
@@ -89,6 +92,7 @@ def fit_lin(
             default_alpha=float(C.ALPHA),
             l1_ratio=l1_ratio,
             random_state=C.RANDOM_STATE,
+            objective=objective,
         )
 
     model = create_linear_model(
@@ -115,6 +119,8 @@ def fit_tr(
     model_type: str,
     result: PreprocessResult,
     config: ModuleType | None = None,
+    *,
+    objective: str = "oos_r2",
 ) -> FitBundle:
     if config is None:
         import config.config_tr as config
@@ -142,6 +148,7 @@ def fit_tr(
         min_samples_leaf=C.MIN_SAMPLES_LEAF,
         early_stopping_patience=C.EARLY_STOPPING_PATIENCE,
         random_state=C.RANDOM_STATE,
+        objective=objective,
     )
 
     model = create_tree_model(
@@ -160,6 +167,7 @@ def fit_tr(
         X_val=val.X if use_val_stop else None,
         y_val=val.y if use_val_stop else None,
         early_stopping_patience=C.EARLY_STOPPING_PATIENCE,
+        objective=objective,
     )
     best_iteration = (
         int(fit_info["best_iteration"]) if "best_iteration" in fit_info else None
@@ -187,6 +195,8 @@ def fit_nn(
     model_type: str,
     result: PreprocessResult,
     config: ModuleType | None = None,
+    *,
+    objective: str = "oos_r2",
 ) -> FitBundle:
     if config is None:
         import config.config_nn as config
@@ -225,6 +235,7 @@ def fit_nn(
         ft_heads=ft_heads,
         device=device,
         random_state=C.RANDOM_STATE,
+        objective=objective,
     )
 
     model = create_nn_model(
@@ -254,6 +265,7 @@ def fit_nn(
         batch_size=int(C.BATCH_SIZE),
         max_iter=int(C.MAX_ITER),
         random_state=C.RANDOM_STATE,
+        objective=objective,
     )
     best_iteration = int(fit_info["best_iteration"])
     hidden = C.HIDDEN_SIZES.get(model_type, ())
@@ -281,8 +293,10 @@ def fit_nn(
 def _build_lin_spec() -> FamilySpec:
     import config.config_lin as C
 
-    def fit_one(model_type: str, result: PreprocessResult) -> FitBundle:
-        return fit_lin(model_type, result, C)
+    def fit_one(
+        model_type: str, result: PreprocessResult, objective: str = "oos_r2"
+    ) -> FitBundle:
+        return fit_lin(model_type, result, C, objective=objective)
 
     return FamilySpec(
         name="lin",
@@ -307,8 +321,10 @@ def _build_lin_spec() -> FamilySpec:
 def _build_tr_spec() -> FamilySpec:
     import config.config_tr as C
 
-    def fit_one(model_type: str, result: PreprocessResult) -> FitBundle:
-        return fit_tr(model_type, result, C)
+    def fit_one(
+        model_type: str, result: PreprocessResult, objective: str = "oos_r2"
+    ) -> FitBundle:
+        return fit_tr(model_type, result, C, objective=objective)
 
     return FamilySpec(
         name="tr",
@@ -339,8 +355,10 @@ def _build_tr_spec() -> FamilySpec:
 def _build_nn_spec() -> FamilySpec:
     import config.config_nn as C
 
-    def fit_one(model_type: str, result: PreprocessResult) -> FitBundle:
-        return fit_nn(model_type, result, C)
+    def fit_one(
+        model_type: str, result: PreprocessResult, objective: str = "oos_r2"
+    ) -> FitBundle:
+        return fit_nn(model_type, result, C, objective=objective)
 
     return FamilySpec(
         name="nn",

@@ -215,12 +215,14 @@ def run_one_model(
     train_y_mean: float,
     task: str,
     quiet: bool = False,
+    objective: str = "oos_r2",
 ) -> tuple[dict[str, float | int | str], pd.DataFrame, dict[str, object]]:
     """Fit one model via the family adapter, then shared metrics / report.
 
     ``quiet=True`` skips the terminal fit report (used by feature-search trials).
+    ``objective`` selects the val metric for inner HP grids (alpha / depth).
     """
-    bundle = spec.fit_one(model_type, result)
+    bundle = spec.fit_one(model_type, result, objective)
     cfg = spec.config
 
     fold_predictions = {
@@ -286,12 +288,14 @@ def score_feature_subset(
     feature_columns: Sequence[str],
     events: pd.DataFrame,
     preprocess_cache: dict[tuple[frozenset[str], str], PreprocessResult] | None = None,
+    objective: str = "oos_r2",
 ) -> tuple[dict[str, float | int | str], dict[str, object]]:
     """Fit one model on a column subset; return ``(summary, fit_record)``.
 
     ``summary`` includes test SUMMARY fields plus train/val search metrics
     (``train_*`` / ``n_val`` / ``val_*``). Preprocess results are cached by
     ``(frozenset(columns), family)`` when a cache dict is provided.
+    ``objective`` is shared with inner HP tuning so search and tune stay aligned.
     """
     columns = list(feature_columns)
     if not columns:
@@ -339,6 +343,7 @@ def score_feature_subset(
         train_y_mean=train_y_mean,
         task=task,
         quiet=True,
+        objective=objective,
     )
     return summary, record
 
@@ -361,6 +366,7 @@ def run_family(
     print_config: bool = True,
     print_summary: bool = True,
     quiet: bool = False,
+    objective: str = "oos_r2",
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Full batch run for one model family (config → data → fit).
 
@@ -370,6 +376,7 @@ def run_family(
     a shorter summary). ``print_summary=False`` skips the per-call SUMMARY
     block so batch entrypoints can print one merged table at the end.
     ``quiet=True`` skips per-model METRICS / QUINTILES reports.
+    ``objective`` selects the val metric for inner HP grids (alpha / depth).
     Returns ``(metrics, predictions, config)`` with a leading ``family``
     column on the frames. Does not write artifacts.
     """
@@ -442,6 +449,7 @@ def run_family(
             train_y_mean=train_y_mean,
             task=task,
             quiet=quiet,
+            objective=objective,
         )
         summary_rows.append(summary)
         prediction_blocks.append(predictions)

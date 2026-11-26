@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from config.config import EARNINGS_FILE, SENTIMENT_FILE, STOCK_FILE
+from config.config import EARNINGS_FILE, OBJECTIVE, SENTIMENT_FILE, STOCK_FILE
 from config_main import MODELS
 from src.compact_json import write_compact_json
 from src.features import registered_features
-from src.metrics import print_summary_table
+from src.metrics import normalize_tuning_objective, print_summary_table
 from src.pipeline import print_banner, run_family, save_run_artifacts
 from src.prepare import sticky_model_bar
 from src.train import FamilyName, FamilySpec, get_family_spec
@@ -37,6 +37,7 @@ VERBOSE_PRINT = False
 # True: write output/main_predictions.parquet alongside main_metrics.csv.
 SAVE_PREDICTIONS = False
 
+# OBJECTIVE lives in config/config.py (shared default with family runs).
 # Model feature menus: edit ``MODELS`` in ``config_main.py`` (empty = skip).
 
 # ========================================================================================
@@ -279,12 +280,14 @@ def _config_snapshot(
         run.update(_used_hyperparams(spec, model_type))
         runs.append(run)
     return {
+        "objective": normalize_tuning_objective(OBJECTIVE),
         "shared": _shared_snapshot(pairs),
         "runs": runs,
     }
 
 
 def main() -> None:
+    objective = normalize_tuning_objective(OBJECTIVE)
     _validate_models()
     pairs = _selected_pairs()
     if not pairs:
@@ -309,6 +312,7 @@ def main() -> None:
                 print_config=False,
                 print_summary=False,
                 quiet=not VERBOSE_PRINT,
+                objective=objective,
             )
             feature_key = _feature_key(columns)
             metrics = metrics.copy()

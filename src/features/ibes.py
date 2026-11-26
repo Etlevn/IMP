@@ -12,6 +12,7 @@ from src.features.wrds_cache import (
     ASOF_COLUMN,
     TICKER_COLUMN,
     asof_attach,
+    cache_paths,
     load_cached_or_raise,
     load_universe,
     open_wrds,
@@ -36,10 +37,12 @@ ALL_IBES = (
 
 # Quarterly surprise features: as-of on available_on (not STATPERS).
 EVENT_FEATURES = ("sue_lag1", "sue_lag2", "beat_rate_4q")
-STEM_SNAP = "ibes"
-STEM_SUE = "ibes_sue"
+STEM_IBES = "ibes"
+ROW_KIND_COLUMN = "row_kind"
+ROW_KIND_STATPERS = "statpers"
+ROW_KIND_EVENT = "event"
 
-QUERY_FINGERPRINT = "ibes.statsum_epsus|qtr_fpi6+ltg|v8_sue_direct_asof"
+QUERY_FINGERPRINT = "ibes.statsum_epsus|qtr_fpi6+ltg|v9_unified_rows"
 
 
 def split_ibes_features(wanted: list[str]) -> tuple[list[str], list[str]]:
@@ -421,6 +424,39 @@ def _download_ibes_frame(
     return snap_out, event_out
 
 
+def _align_ibes_cache_rows(
+    snap_frame: pd.DataFrame, event_frame: pd.DataFrame, wanted: list[str]
+) -> pd.DataFrame:
+    """Stack STATPERS + event rows with ``row_kind`` for a unified IBES cache."""
+    pieces: list[pd.DataFrame] = []
+    if len(snap_frame):
+        snap = snap_frame.copy()
+        snap[ROW_KIND_COLUMN] = ROW_KIND_STATPERS
+        pieces.append(snap)
+    if len(event_frame):
+        event = event_frame.copy()
+        for col in wanted:
+            if col not in event.columns:
+                event[col] = np.nan
+        event[ROW_KIND_COLUMN] = ROW_KIND_EVENT
+        pieces.append(event)
+    if not pieces:
+        return pd.DataFrame(
+            columns=[TICKER_COLUMN, ASOF_COLUMN, *wanted, ROW_KIND_COLUMN]
+        )
+    out = pd.concat(pieces, ignore_index=True, sort=False)
+    for col in wanted:
+        if col not in out.columns:
+            out[col] = np.nan
+    return out.loc[:, [TICKER_COLUMN, ASOF_COLUMN, *wanted, ROW_KIND_COLUMN]]
+
+
+def _remove_legacy_ibes_sue_cache(folder: Path) -> None:
+    for path in cache_paths(folder, "ibes_sue"):
+        if path.exists():
+            path.unlink()
+
+
 def fetch_ibes_cache(
     folder: Path,
     start: pd.Timestamp,
@@ -429,7 +465,7 @@ def fetch_ibes_cache(
     ibes_features: list[str] | None = None,
     username: str | None = None,
 ) -> pd.DataFrame:
-    """Download from WRDS and write ``ibes`` + ``ibes_sue`` caches."""
+    """Download from WRDS and write unified ``ibes`` cache (statpers + event rows)."""
     wanted = list(IBES_FEATURES if ibes_features is None else ibes_features)
     if not wanted:
         raise ValueError("IBES_FEATURES is empty; nothing to fetch.")
@@ -442,32 +478,29 @@ def fetch_ibes_cache(
     snap_frame, event_frame = _download_ibes_frame(
         folder, start, end, username=username
     )
-    snap_feats, event_feats = split_ibes_features(wanted)
+    unified = _align_ibes_cache_rows(snap_frame, event_frame, wanted)
+    if unified.empty:
+        raise RuntimeError("IBES download produced no cache rows.")
 
-    if snap_feats:
-        write_feature_cache(
-            folder,
-            STEM_SNAP,
-            snap_frame,
-            features=snap_feats,
-            universe_hash_value=uhash,
-            query_fingerprint=QUERY_FINGERPRINT,
-        )
-    if event_feats and len(event_frame) > 0:
-        write_feature_cache(
-            folder,
-            STEM_SUE,
-            event_frame,
-            features=event_feats,
-            universe_hash_value=uhash,
-            query_fingerprint=QUERY_FINGERPRINT,
-        )
-
-    if snap_feats:
-        return load_cached_or_raise(
-            folder, STEM_SNAP, features=snap_feats, start=start, end=end
-        )
-    return event_frame
+    write_feature_cache(
+        folder,
+        STEM_IBES,
+        unified,
+        features=wanted,
+        universe_hash_value=uhash,
+        query_fingerprint=QUERY_FINGERPRINT,
+        extra_columns=[ROW_KIND_COLUMN],
+        extra_meta={"row_kinds": [ROW_KIND_STATPERS, ROW_KIND_EVENT]},
+    )
+    _remove_legacy_ibes_sue_cache(folder)
+    return load_cached_or_raise(
+        folder,
+        STEM_IBES,
+        features=wanted,
+        start=start,
+        end=end,
+        extra_columns=[ROW_KIND_COLUMN],
+    )
 
 
 def load_ibes(
@@ -477,7 +510,7 @@ def load_ibes(
     *,
     ibes_features: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Read IBES STATPERS snapshot cache only (not SUE event cache)."""
+    """Read IBES STATPERS snapshot rows from the unified cache."""
     wanted = list(IBES_FEATURES if ibes_features is None else ibes_features)
     snap_feats, _event_feats = split_ibes_features(wanted)
     if not snap_feats:
@@ -485,8 +518,16 @@ def load_ibes(
     unknown = [n for n in snap_feats if n not in ALL_IBES]
     if unknown:
         raise ValueError(f"Unknown IBES_FEATURES {unknown}; allowed: {list(ALL_IBES)}")
-    return load_cached_or_raise(
-        folder, STEM_SNAP, features=snap_feats, start=start, end=end
+    cache = load_cached_or_raise(
+        folder,
+        STEM_IBES,
+        features=snap_feats,
+        start=start,
+        end=end,
+        extra_columns=[ROW_KIND_COLUMN],
+    )
+    return cache.loc[cache[ROW_KIND_COLUMN] == ROW_KIND_STATPERS].drop(
+        columns=[ROW_KIND_COLUMN]
     )
 
 
@@ -507,13 +548,18 @@ def attach_ibes(
     snap_feats, event_feats = split_ibes_features(wanted)
     out = frame.copy()
 
+    cache = load_cached_or_raise(
+        folder,
+        STEM_IBES,
+        features=wanted,
+        start=dates.min(),
+        end=dates.max(),
+        extra_columns=[ROW_KIND_COLUMN],
+    )
+
     if snap_feats:
-        snap_cache = load_cached_or_raise(
-            folder,
-            STEM_SNAP,
-            features=snap_feats,
-            start=dates.min(),
-            end=dates.max(),
+        snap_cache = cache.loc[cache[ROW_KIND_COLUMN] == ROW_KIND_STATPERS].drop(
+            columns=[ROW_KIND_COLUMN]
         )
         age = (
             "days_since_est_update"
@@ -530,24 +576,18 @@ def attach_ibes(
         )
 
     if event_feats:
-        try:
-            sue_cache = load_cached_or_raise(
-                folder,
-                STEM_SUE,
-                features=event_feats,
-                start=dates.min(),
-                end=dates.max(),
-            )
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(
-                f"Missing {STEM_SUE} feature cache under {folder}. "
-                "Run: python script/fetch_wrds_ibes.py"
-            ) from exc
-        out = asof_attach(
-            out,
-            sue_cache,
-            features=event_feats,
-            date_column="Date",
-            desc="ibes_sue",
+        event_cache = cache.loc[cache[ROW_KIND_COLUMN] == ROW_KIND_EVENT].drop(
+            columns=[ROW_KIND_COLUMN]
         )
+        if event_cache.empty:
+            for col in event_feats:
+                out[col] = np.nan
+        else:
+            out = asof_attach(
+                out,
+                event_cache,
+                features=event_feats,
+                date_column="Date",
+                desc="ibes_sue",
+            )
     return out

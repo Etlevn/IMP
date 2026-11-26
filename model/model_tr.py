@@ -10,7 +10,14 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.tree import DecisionTreeRegressor
 
-from src.metrics import evaluate_regression
+from src.metrics import (
+    evaluate_regression,
+    is_tuning_improvement,
+    normalize_tuning_objective,
+    pick_tuning_row,
+    regression_tuning_metrics,
+    tuning_metric_value,
+)
 
 # Avoid OpenMP runtime clashes when torch and GBDT share one process.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -149,6 +156,28 @@ def create_tree_model(
     )
 
 
+def _booster_max_rounds(model: Any) -> int:
+    """Configured boosting rounds for LGBM / XGB / CatBoost templates."""
+    name = type(model).__name__.lower()
+    if "catboost" in name:
+        params = model.get_params()
+        return int(params.get("iterations") or getattr(model, "iterations", 0) or 1)
+    return int(getattr(model, "n_estimators", 1) or 1)
+
+
+def _clone_booster_with_rounds(model: Any, n_rounds: int) -> Any:
+    """Clone an external booster and set its tree/iteration budget."""
+    from sklearn.base import clone
+
+    probe = clone(model)
+    name = type(model).__name__.lower()
+    if "catboost" in name:
+        probe.set_params(iterations=int(n_rounds))
+    else:
+        probe.set_params(n_estimators=int(n_rounds))
+    return probe
+
+
 def _fit_hgb_on_chronological_val(
     *,
     max_depth: int,
@@ -162,8 +191,10 @@ def _fit_hgb_on_chronological_val(
     y_val: np.ndarray,
     train_y_mean: float,
     early_stopping_patience: int,
+    objective: str = "oos_r2",
 ) -> tuple[Any, int]:
-    """Grow boosters with warm_start; stop using chronological val OOS R²."""
+    """Grow boosters with warm_start; stop on chronological val OBJECTIVE."""
+    objective = normalize_tuning_objective(objective)
     probe = HistGradientBoostingRegressor(
         max_iter=1,
         max_depth=max_depth,
@@ -174,24 +205,28 @@ def _fit_hgb_on_chronological_val(
         random_state=random_state,
     )
     best_iter = 1
-    best_oos = float("-inf")
+    best_metric = float("-inf")
     best_rmse = float("inf")
     stale = 0
     for n_iter in range(1, int(n_estimators) + 1):
         probe.set_params(max_iter=n_iter)
         probe.fit(X_train, y_train)
-        metrics = evaluate_regression(
-            y_val, probe.predict(X_val), train_y_mean=train_y_mean
+        metrics = regression_tuning_metrics(
+            y_train,
+            probe.predict(X_train),
+            y_val,
+            probe.predict(X_val),
+            train_y_mean=train_y_mean,
         )
-        oos = float(metrics["oos_r2"])
-        rmse = float(metrics["rmse"])
-        improved = oos > best_oos + 1e-12 or (
-            np.isclose(oos, best_oos) and rmse < best_rmse
-        )
-        if improved:
+        if is_tuning_improvement(
+            metrics,
+            best_metric=best_metric,
+            best_rmse=best_rmse,
+            objective=objective,
+        ):
             best_iter = n_iter
-            best_oos = oos
-            best_rmse = rmse
+            best_metric = tuning_metric_value(metrics, objective)
+            best_rmse = float(metrics["val_rmse"])
             stale = 0
         else:
             stale += 1
@@ -219,71 +254,46 @@ def _fit_external_booster_on_val(
     y_val: np.ndarray,
     *,
     early_stopping_patience: int,
+    train_y_mean: float,
+    objective: str = "oos_r2",
 ) -> tuple[Any, int]:
-    """Fit LGBM / XGB / CatBoost with chronological val early stopping."""
-    name = type(model).__name__.lower()
-    if "lgbm" in name:
-        lgb = _require_lightgbm()
-        callbacks = [
-            lgb.early_stopping(
-                stopping_rounds=int(early_stopping_patience),
-                verbose=False,
-            )
-        ]
-        try:
-            model.fit(
-                X_train,
-                y_train,
-                eval_X=X_val,
-                eval_y=y_val,
-                callbacks=callbacks,
-            )
-        except TypeError:
-            model.fit(
-                X_train,
-                y_train,
-                eval_set=[(X_val, y_val)],
-                callbacks=callbacks,
-            )
-        best_iter = int(getattr(model, "best_iteration_", 0) or 0)
-        if best_iter <= 0:
-            best_iter = int(model.n_estimators)
-        return model, best_iter
-    if "xgb" in name:
-        try:
-            model.set_params(early_stopping_rounds=int(early_stopping_patience))
-        except ValueError:
-            pass
-        try:
-            model.fit(
-                X_train,
-                y_train,
-                eval_set=[(X_val, y_val)],
-                verbose=False,
-            )
-        except TypeError:
-            model.fit(X_train, y_train, eval_set=[(X_val, y_val)])
-        best_iter = int(getattr(model, "best_iteration", 0) or 0)
-        if best_iter <= 0:
-            booster = getattr(model, "get_booster", lambda: None)()
-            if booster is not None:
-                best_iter = int(getattr(booster, "best_iteration", 0) or 0)
-        if best_iter <= 0:
-            best_iter = int(model.n_estimators)
-        return model, best_iter
-    # CatBoost
-    model.fit(
-        X_train,
-        y_train,
-        eval_set=(X_val, y_val),
-        early_stopping_rounds=int(early_stopping_patience),
-        use_best_model=True,
-        verbose=False,
-    )
-    best_iter = int(model.get_best_iteration() or 0)
-    if best_iter <= 0:
-        best_iter = int(model.tree_count_)
-    return model, best_iter
+    """Fit LGBM / XGB / CatBoost; early-stop on chronological val OBJECTIVE."""
+    objective = normalize_tuning_objective(objective)
+    max_rounds = max(1, _booster_max_rounds(model))
+    best_iter = 1
+    best_metric = float("-inf")
+    best_rmse = float("inf")
+    best_model: Any | None = None
+    stale = 0
+    for n_iter in range(1, max_rounds + 1):
+        probe = _clone_booster_with_rounds(model, n_iter)
+        probe.fit(X_train, y_train)
+        metrics = regression_tuning_metrics(
+            y_train,
+            np.asarray(probe.predict(X_train), dtype=float),
+            y_val,
+            np.asarray(probe.predict(X_val), dtype=float),
+            train_y_mean=train_y_mean,
+        )
+        if is_tuning_improvement(
+            metrics,
+            best_metric=best_metric,
+            best_rmse=best_rmse,
+            objective=objective,
+        ):
+            best_iter = n_iter
+            best_metric = tuning_metric_value(metrics, objective)
+            best_rmse = float(metrics["val_rmse"])
+            best_model = probe
+            stale = 0
+        else:
+            stale += 1
+            if stale >= int(early_stopping_patience):
+                break
+    if best_model is None:
+        best_model = _clone_booster_with_rounds(model, best_iter)
+        best_model.fit(X_train, y_train)
+    return best_model, int(best_iter)
 
 
 def fit_tree_model(
@@ -294,8 +304,10 @@ def fit_tree_model(
     X_val: pd.DataFrame | None = None,
     y_val: pd.Series | None = None,
     early_stopping_patience: int = 10,
+    objective: str = "oos_r2",
 ) -> tuple[Any, dict[str, float | int]]:
-    """Fit on train; boosted trees early-stop on chronological val when provided."""
+    """Fit on train; boosted trees early-stop on chronological val OBJECTIVE."""
+    objective = normalize_tuning_objective(objective)
     X_tr = X_train.to_numpy(dtype=float)
     y_tr = np.asarray(y_train, dtype=float)
     info: dict[str, float | int] = {}
@@ -321,6 +333,7 @@ def fit_tree_model(
             y_val=y_va,
             train_y_mean=train_mean,
             early_stopping_patience=int(early_stopping_patience),
+            objective=objective,
         )
         info["best_iteration"] = int(best_iter)
         return fitted, info
@@ -344,6 +357,8 @@ def fit_tree_model(
             X_va,
             y_va,
             early_stopping_patience=int(early_stopping_patience),
+            train_y_mean=float(y_tr.mean()),
+            objective=objective,
         )
         info["best_iteration"] = int(best_iter)
         return fitted, info
@@ -371,11 +386,14 @@ def select_max_depth_on_val(
     min_samples_leaf: int = 20,
     early_stopping_patience: int = 10,
     random_state: int = 42,
+    objective: str = "oos_r2",
 ) -> tuple[int, pd.DataFrame]:
-    """Pick max_depth on chronological val by maximizing ``oos_r2``.
+    """Pick max_depth on chronological val by maximizing ``objective``.
 
+    ``objective`` is one of ``oos_r2`` | ``rank_ic`` | ``quintile_ls``.
     Returns ``(best_depth, tuning_table)``. Empty grid -> ``default_max_depth``.
     """
+    objective = normalize_tuning_objective(objective)
     if model_type not in DEPTH_TUNABLE_TYPES or not depth_grid:
         return int(default_max_depth), pd.DataFrame()
 
@@ -397,24 +415,16 @@ def select_max_depth_on_val(
             X_val=X_val if model_type in EARLY_STOP_TYPES else None,
             y_val=y_val if model_type in EARLY_STOP_TYPES else None,
             early_stopping_patience=early_stopping_patience,
+            objective=objective,
         )
-        metrics = evaluate_regression(
+        metrics = regression_tuning_metrics(
+            y_train,
+            predict_tree(fitted, X_train),
             y_val,
             predict_tree(fitted, X_val),
             train_y_mean=train_mean,
         )
-        rows.append(
-            {
-                "max_depth": int(depth),
-                "val_rmse": metrics["rmse"],
-                "val_mae": metrics["mae"],
-                "val_ic": metrics["ic"],
-                "val_oos_r2": metrics["oos_r2"],
-            }
-        )
-    table = pd.DataFrame(rows)
-    table = table.sort_values(
-        ["val_oos_r2", "val_rmse"], ascending=[False, True]
-    ).reset_index(drop=True)
+        rows.append({"max_depth": int(depth), **metrics})
+    table = pick_tuning_row(pd.DataFrame(rows), objective)
     best_depth = int(table.loc[0, "max_depth"])
     return best_depth, table

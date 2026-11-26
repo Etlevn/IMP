@@ -1,7 +1,8 @@
-"""Download IBES features from WRDS into data/ibes_features.* (+ ibes_sue_features.*).
+"""Download IBES features from WRDS into data/ibes_features.parquet (+ .json).
 
-STATPERS consensus → ``ibes_features``; quarterly SUE/beat → ``ibes_sue_features``
-(asof = available_on). Attach paths only read the caches (no WRDS in main / feat_filter).
+Unified cache rows: ``row_kind=statpers`` (consensus / revisions) and
+``row_kind=event`` (SUE/beat with asof = available_on). Attach still does two
+as-of joins by feature group. Attach paths only read the cache (no WRDS).
 
 Usage (from repo root):
     python script/export_universe.py   # need permno
@@ -39,11 +40,9 @@ def main() -> None:
         ibes_features=list(IBES_FEATURES),
         username=WRDS_USERNAME,
     )
-    for stem in ("ibes", "ibes_sue"):
-        path, meta_path = cache_paths(DATA_DIR, stem)
-        if path.exists():
-            print(f"[WROTE] {path}")
-            print(f"[WROTE] {meta_path}")
+    path, meta_path = cache_paths(DATA_DIR, "ibes")
+    print(f"[WROTE] {path}")
+    print(f"[WROTE] {meta_path}")
 
 
 if __name__ == "__main__":

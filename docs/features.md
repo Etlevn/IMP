@@ -49,7 +49,7 @@ Yahoo daily close, left-merged on `Date` in `src/features/macro.py`. Cached unde
 
 ## IBES (WRDS)
 
-Fetch: `python script/export_universe.py` then `python script/fetch_wrds_ibes.py` → `data/ibes_features.*` (STATPERS consensus) and `data/ibes_sue_features.*` (quarterly SUE/beat). Consensus/revisions as-of on `statpers`. SUE/beat are built on `(TickerId, fpedats)` events (consensus from last `statpers < anndats_act`), become usable on `available_on = anndats_act + 1` calendar day, and are as-of joined **directly** onto the trading-day panel (not gated on the next STATPERS). `sue_lag1` / `sue_lag2` are the most recent and second-most-recent announced-quarter SUE. PIT regressions: `pytest tests/test_ibes_sue_pit.py`. See `IBES_FEATURES` in `config/config.py`.
+Fetch: `python script/export_universe.py` then `python script/fetch_wrds_ibes.py` → `data/ibes_features.*` with dual row kinds in one table: `row_kind=statpers` (consensus/revisions, `asof_date=statpers`) and `row_kind=event` (SUE/beat, `asof_date=available_on`). Attach still runs two as-of joins by feature group. SUE/beat use `(TickerId, fpedats)` events (pre-ann consensus from last `statpers < anndats_act`), usable from `anndats_act + 1` calendar day, joined directly onto the trading-day panel (not gated on the next STATPERS). PIT regressions: `pytest tests/test_ibes_sue_pit.py`. See `IBES_FEATURES` in `config/config.py`.
 
 ## Compustat (WRDS)
 

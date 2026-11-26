@@ -15,7 +15,14 @@ from model.torch_nn import (
     fit_torch_regressor,
     predict_torch,
 )
-from src.metrics import evaluate_regression
+from src.metrics import (
+    evaluate_regression,
+    is_tuning_improvement,
+    normalize_tuning_objective,
+    pick_tuning_row,
+    regression_tuning_metrics,
+    tuning_metric_value,
+)
 
 SKLEARN_MLP_TYPES = frozenset({"mlp_shallow", "mlp", "mlp_deep"})
 TORCH_NN_TYPES = frozenset({"mlp_dropout", "wide_deep", "ft_transformer"})
@@ -124,8 +131,10 @@ def fit_nn_model(
     batch_size: int = 64,
     max_iter: int = 200,
     random_state: int = 42,
+    objective: str = "oos_r2",
 ) -> tuple[Any, dict[str, float | int]]:
-    """Fit with chronological validation early stopping on ``oos_r2``."""
+    """Fit with chronological validation early stopping on ``objective``."""
+    objective = normalize_tuning_objective(objective)
     if isinstance(model, TorchBundle):
         fitted = fit_torch_regressor(
             model,
@@ -139,6 +148,7 @@ def fit_nn_model(
             max_epochs=int(max_iter),
             early_stopping_patience=int(early_stopping_patience),
             random_state=int(random_state),
+            objective=objective,
         )
         return fitted, {"best_iteration": int(fitted.best_iteration)}
 
@@ -151,25 +161,29 @@ def fit_nn_model(
 
     probe = _clone_mlp_template(model)
     best_epoch = 1
-    best_oos = float("-inf")
+    best_metric = float("-inf")
     best_rmse = float("inf")
     best_model: MLPRegressor | None = None
     stale = 0
 
     for epoch in range(1, max_epochs + 1):
         probe.partial_fit(X_tr, y_tr)
-        metrics = evaluate_regression(
-            y_va, probe.predict(X_va), train_y_mean=train_mean
+        metrics = regression_tuning_metrics(
+            y_tr,
+            probe.predict(X_tr),
+            y_va,
+            probe.predict(X_va),
+            train_y_mean=train_mean,
         )
-        oos = float(metrics["oos_r2"])
-        rmse = float(metrics["rmse"])
-        improved = oos > best_oos + 1e-12 or (
-            np.isclose(oos, best_oos) and rmse < best_rmse
-        )
-        if improved:
+        if is_tuning_improvement(
+            metrics,
+            best_metric=best_metric,
+            best_rmse=best_rmse,
+            objective=objective,
+        ):
             best_epoch = epoch
-            best_oos = oos
-            best_rmse = rmse
+            best_metric = tuning_metric_value(metrics, objective)
+            best_rmse = float(metrics["val_rmse"])
             best_model = deepcopy(probe)
             stale = 0
         else:
@@ -212,8 +226,10 @@ def select_alpha_on_val(
     ft_heads: int = 4,
     device: str = "cpu",
     random_state: int = 42,
+    objective: str = "oos_r2",
 ) -> tuple[float, pd.DataFrame]:
-    """Pick L2 / weight-decay ``alpha`` on chronological val by maximizing ``oos_r2``."""
+    """Pick L2 / weight-decay ``alpha`` on val by maximizing ``objective``."""
+    objective = normalize_tuning_objective(objective)
     if model_type not in ALPHA_TUNABLE_TYPES or not alpha_grid:
         return float(default_alpha), pd.DataFrame()
 
@@ -248,24 +264,16 @@ def select_alpha_on_val(
             batch_size=batch_size,
             max_iter=max_iter,
             random_state=random_state,
+            objective=objective,
         )
-        metrics = evaluate_regression(
+        metrics = regression_tuning_metrics(
+            y_train,
+            predict_nn(fitted, X_train),
             y_val,
             predict_nn(fitted, X_val),
             train_y_mean=train_mean,
         )
-        rows.append(
-            {
-                "alpha": float(alpha),
-                "val_rmse": metrics["rmse"],
-                "val_mae": metrics["mae"],
-                "val_ic": metrics["ic"],
-                "val_oos_r2": metrics["oos_r2"],
-            }
-        )
-    table = pd.DataFrame(rows)
-    table = table.sort_values(
-        ["val_oos_r2", "val_rmse"], ascending=[False, True]
-    ).reset_index(drop=True)
+        rows.append({"alpha": float(alpha), **metrics})
+    table = pick_tuning_row(pd.DataFrame(rows), objective)
     best_alpha = float(table.loc[0, "alpha"])
     return best_alpha, table

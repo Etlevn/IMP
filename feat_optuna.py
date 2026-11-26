@@ -11,9 +11,12 @@ labels enabled below; ``FEATURE_BLACKLIST`` is excluded. Edit ``MODELS`` /
 
 Selection maximizes ``selection_score`` from ``OBJECTIVE`` on the
 validation fold, with optional train/val gap via ``GAP_MODE`` /
-``GAP_PENALTY`` (test never enters selection). When the searchable pool
-is at most ``EXHAUSTIVE_MAX``, all non-empty subsets are enumerated;
-otherwise Optuna TPE runs ``N_TRIALS`` trials.
+``GAP_PENALTY`` (test never enters selection). The same ``OBJECTIVE``
+drives inner HP grids (alpha / max_depth) and early stopping. Keep
+``OBJECTIVE`` aligned with ``config.config.OBJECTIVE`` (used by main).
+When the searchable pool is at most
+``EXHAUSTIVE_MAX``, all non-empty subsets are enumerated; otherwise
+Optuna TPE runs ``N_TRIALS`` trials.
 Artifacts: ``output/feat_optuna.csv`` is rewritten after each model with
 that model's best row (so a crash still keeps finished models); optional
 ``output/feat_optuna_trial.csv`` when ``SAVE_TRIALS`` (appended per model);
@@ -87,16 +90,18 @@ MODELS: dict[str, tuple[str, ...]] = {
 }
 
 # Which feat_filter ``suggest`` labels enter the pool after FEATURE_WHITELIST.
-INCLUDE_SUGGEST: list[str] = ["keep", "weak", "noise"]    # ["keep", "weak", "noise", "redundant", "drop"]
+INCLUDE_SUGGEST: list[str] = ["keep","weak"]    # ["keep", "weak", "noise", "redundant", "drop"]
 
-# Validation metric inside the selection score. One of: "oos_r2" | "rank_ic" | "quintile_ls".
+# Outer feature-search + inner HP-tuning / early-stop metric.
+# Keep in sync with config.config.OBJECTIVE (used by main.py).
+# One of: "oos_r2" | "rank_ic" | "quintile_ls".
 OBJECTIVE: str = "rank_ic"
 
 # How train/val enter selection_score. One of:
 #   "none" → pure val (GAP_PENALTY ignored)
 #   "abs"  → val - GAP_PENALTY * |train - val|
 #   "pos"  → val - GAP_PENALTY * max(0, val - train)
-GAP_MODE: str = "none"
+GAP_MODE: str = "abs"
 
 # Gap weight for "abs" / "pos". Allowed: float >= 0.
 GAP_PENALTY = 1.0
@@ -308,13 +313,12 @@ def main() -> None:
 
     best_rows: list[pd.DataFrame] = []
     best_cols: list[str] | None = None
-    sort_col = OBJECTIVE  # test column matching the val OBJECTIVE (display only)
+    # Keep model-run order in feat_optuna.csv (no cross-model metric sort).
     required = (
         "n_val",
         train_column(OBJECTIVE),
         objective_column(OBJECTIVE),
         SELECTION_SCORE_COLUMN,
-        sort_col,
     )
 
     with sticky_stack((len(pairs), max(trial_total, 1))) as (model_bar, trial_bar):
@@ -355,13 +359,7 @@ def main() -> None:
                     f"got {len(row)}."
                 )
             best_rows.append(row)
-            best = (
-                pd.concat(best_rows, axis=0, ignore_index=True)
-                .sort_values(
-                    sort_col, ascending=False, na_position="last", kind="mergesort"
-                )
-                .reset_index(drop=True)
-            )
+            best = pd.concat(best_rows, axis=0, ignore_index=True)
             best.to_csv(best_path, index=False, float_format="%.4f")
 
             if SAVE_TRIALS:
@@ -381,11 +379,7 @@ def main() -> None:
 
     if not best_rows or best_cols is None:
         raise RuntimeError("No models produced best rows.")
-    best = (
-        pd.concat(best_rows, axis=0, ignore_index=True)
-        .sort_values(sort_col, ascending=False, na_position="last", kind="mergesort")
-        .reset_index(drop=True)
-    )
+    best = pd.concat(best_rows, axis=0, ignore_index=True)
 
     display = best.copy()
     format_cols = (

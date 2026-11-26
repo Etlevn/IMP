@@ -23,6 +23,117 @@ REGRESSION_TARGETS = frozenset(
 )
 CLASSIFICATION_TARGETS = frozenset({"dir_ann"})
 
+# Shared by feat_optuna outer search and inner HP tuning (lin/tr/nn).
+TUNING_OBJECTIVE_CHOICES: tuple[str, ...] = ("oos_r2", "rank_ic", "quintile_ls")
+
+
+def normalize_tuning_objective(objective: str) -> str:
+    """Validate OBJECTIVE used for val-based HP selection / feature search."""
+    name = str(objective).strip()
+    if name not in TUNING_OBJECTIVE_CHOICES:
+        raise ValueError(
+            f"Unknown OBJECTIVE={objective!r}; expected one of "
+            f"{TUNING_OBJECTIVE_CHOICES}."
+        )
+    return name
+
+
+def regression_tuning_metrics(
+    y_train: np.ndarray | pd.Series,
+    y_pred_train: np.ndarray | pd.Series,
+    y_val: np.ndarray | pd.Series,
+    y_pred_val: np.ndarray | pd.Series,
+    *,
+    train_y_mean: float,
+) -> dict[str, float]:
+    """Val metrics for HP grids, including train→val quintile long-short."""
+    val_metrics = evaluate_regression(
+        y_val, y_pred_val, train_y_mean=float(train_y_mean)
+    )
+    yt_tr = np.asarray(y_train, dtype=float).reshape(-1)
+    yp_tr = np.asarray(y_pred_train, dtype=float).reshape(-1)
+    yt_va = np.asarray(y_val, dtype=float).reshape(-1)
+    yp_va = np.asarray(y_pred_val, dtype=float).reshape(-1)
+    predictions = pd.DataFrame(
+        {
+            "fold": (["train"] * len(yp_tr)) + (["val"] * len(yp_va)),
+            "y_true": np.concatenate([yt_tr, yt_va]),
+            "y_pred": np.concatenate([yp_tr, yp_va]),
+        }
+    )
+    return {
+        "val_rmse": float(val_metrics["rmse"]),
+        "val_mae": float(val_metrics["mae"]),
+        "val_ic": float(val_metrics["ic"]),
+        "val_oos_r2": float(val_metrics["oos_r2"]),
+        "val_rank_ic": float(val_metrics["rank_ic"]),
+        "val_quintile_ls": float(
+            train_quintile_long_short(predictions, test_fold="val")
+        ),
+    }
+
+
+def pick_tuning_row(
+    table: pd.DataFrame,
+    objective: str,
+    *,
+    prefer_non_degenerate: bool = False,
+) -> pd.DataFrame:
+    """Sort a HP-grid table by OBJECTIVE (then lower RMSE); return sorted copy."""
+    objective = normalize_tuning_objective(objective)
+    metric_col = {
+        "oos_r2": "val_oos_r2",
+        "rank_ic": "val_rank_ic",
+        "quintile_ls": "val_quintile_ls",
+    }[objective]
+    if metric_col not in table.columns:
+        raise KeyError(f"tuning table missing {metric_col!r} for OBJECTIVE={objective!r}.")
+    sort_cols: list[str] = []
+    ascending: list[bool] = []
+    if prefer_non_degenerate and "degenerate" in table.columns:
+        sort_cols.append("degenerate")
+        ascending.append(True)
+    sort_cols.extend([metric_col, "val_rmse"])
+    ascending.extend([False, True])
+    return table.sort_values(sort_cols, ascending=ascending).reset_index(drop=True)
+
+
+def tuning_metric_column(objective: str) -> str:
+    """Map OBJECTIVE to the column name in ``regression_tuning_metrics`` output."""
+    objective = normalize_tuning_objective(objective)
+    return {
+        "oos_r2": "val_oos_r2",
+        "rank_ic": "val_rank_ic",
+        "quintile_ls": "val_quintile_ls",
+    }[objective]
+
+
+def tuning_metric_value(metrics: dict[str, float], objective: str) -> float:
+    """Read the OBJECTIVE scalar from a tuning-metrics dict."""
+    col = tuning_metric_column(objective)
+    if col not in metrics:
+        raise KeyError(f"metrics missing {col!r} for OBJECTIVE={objective!r}.")
+    return float(metrics[col])
+
+
+def is_tuning_improvement(
+    metrics: dict[str, float],
+    *,
+    best_metric: float,
+    best_rmse: float,
+    objective: str,
+) -> bool:
+    """True when OBJECTIVE improves, or ties and RMSE falls."""
+    metric = tuning_metric_value(metrics, objective)
+    rmse = float(metrics["val_rmse"])
+    if not np.isfinite(metric):
+        return False
+    if not np.isfinite(best_metric):
+        return True
+    return metric > best_metric + 1e-12 or (
+        np.isclose(metric, best_metric) and rmse < best_rmse
+    )
+
 
 def infer_task(target: str) -> str:
     """Map TARGET column name to ``regression`` or ``classification``."""
