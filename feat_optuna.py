@@ -9,6 +9,9 @@ labels enabled below; ``FEATURE_BLACKLIST`` is excluded. Edit ``MODELS`` /
 
     python feat_optuna.py
 
+For a full OBJECTIVE × GAP_MODE × INCLUDE_SUGGEST sweep, see
+``batch/batch_optuna.py``.
+
 Selection maximizes ``selection_score`` from ``OBJECTIVE`` on the
 validation fold, with optional train/val gap via ``GAP_MODE`` /
 ``GAP_PENALTY`` (test never enters selection). The same ``OBJECTIVE``
@@ -26,8 +29,10 @@ plus ``output/config_optuna.json``. Does not modify ``main.py`` outputs.
 from __future__ import annotations
 
 import gc
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -90,7 +95,7 @@ MODELS: dict[str, tuple[str, ...]] = {
 }
 
 # Which feat_filter ``suggest`` labels enter the pool after FEATURE_WHITELIST.
-INCLUDE_SUGGEST: list[str] = ["keep","weak"]    # ["keep", "weak", "noise", "redundant", "drop"]
+INCLUDE_SUGGEST: list[str] = ["keep", "weak"]  # ["keep", "weak", "noise", "redundant", "drop"]
 
 # Outer feature-search + inner HP-tuning / early-stop metric.
 # Keep in sync with config.config.OBJECTIVE (used by main.py).
@@ -124,20 +129,64 @@ FILTER_PATH = OUTPUT_DIR / "feat_filter.csv"
 
 _FAMILY_ORDER: tuple[FamilyName, ...] = ("lin", "tr", "nn")
 
+# Wide column order for batch append: ids → test SUMMARY → train/val/score.
+_BATCH_OBJECTIVES = ("oos_r2", "rank_ic", "quintile_ls")
+_BATCH_TRAIN_VAL_COLS = tuple(
+    col
+    for name in _BATCH_OBJECTIVES
+    for col in (f"train_{name}", f"val_{name}")
+)
+_BATCH_LEADING = (
+    "objective",
+    "gap",
+    "suggest",
+    "family",
+    "model",
+    "features",
+    "n_features",
+)
+_BATCH_TEST = (
+    "n_test",
+    "oos_r2",
+    "rank_ic",
+    "quintile_ls",
+    "ic",
+    "r2",
+    "mae",
+    "rmse",
+    "hit_rate",
+    "sign_ls",
+)
+_BATCH_VAL = (
+    "n_val",
+    "selection_score",
+    *_BATCH_TRAIN_VAL_COLS,
+)
+BATCH_BEST_COLUMNS: tuple[str, ...] = (
+    *_BATCH_LEADING,
+    *_BATCH_TEST,
+    *_BATCH_VAL,
+)
+
+
+def suggest_label(include_suggest: Sequence[str]) -> str:
+    """Serialize suggest labels like merged CSV: keep / keep+weak / …"""
+    return "+".join(str(name) for name in include_suggest)
+
 
 def _best_columns(objective: str) -> tuple[str, ...]:
-    """Best-table columns: ids, train/val/score, then test SUMMARY."""
+    """Best-table columns: ids, test SUMMARY, then n_val/selection_score/train/val."""
     return (
         "family",
         "model",
         "features",
         "n_features",
-        "n_val",
-        train_column(objective),
-        objective_column(objective),
-        SELECTION_SCORE_COLUMN,
         "n_test",
         *SUMMARY_METRIC_COLUMNS,
+        "n_val",
+        SELECTION_SCORE_COLUMN,
+        train_column(objective),
+        objective_column(objective),
     )
 
 
@@ -197,20 +246,27 @@ def _load_events(columns: list[str]) -> pd.DataFrame:
     )
 
 
-def _snapshot(*, shared: dict) -> dict:
+def _snapshot(
+    *,
+    shared: dict,
+    objective: str,
+    gap_mode: str,
+    gap_penalty: float,
+    include_suggest: Sequence[str],
+) -> dict:
     """Entrypoint / data settings only — no trial or best results."""
     return {
-        "objective": OBJECTIVE,
-        "objective_column": objective_column(OBJECTIVE),
-        "train_column": train_column(OBJECTIVE),
+        "objective": objective,
+        "objective_column": objective_column(objective),
+        "train_column": train_column(objective),
         "selection_score": SELECTION_SCORE_COLUMN,
-        "gap_mode": normalize_gap_mode(GAP_MODE),
-        "gap_penalty": float(GAP_PENALTY),
+        "gap_mode": normalize_gap_mode(gap_mode),
+        "gap_penalty": float(gap_penalty),
         "n_trials": N_TRIALS,
         "exhaustive_max": EXHAUSTIVE_MAX,
         "save_trials": bool(SAVE_TRIALS),
         "preprocess_cache_max": int(PREPROCESS_CACHE_MAX),
-        "include_suggest": list(INCLUDE_SUGGEST),
+        "include_suggest": list(include_suggest),
         "feature_whitelist": list(FEATURE_WHITELIST),
         "feature_blacklist": list(FEATURE_BLACKLIST),
         "filter_path": str(FILTER_PATH),
@@ -220,14 +276,20 @@ def _snapshot(*, shared: dict) -> dict:
     }
 
 
-def _validate_feature_config(catalog: list[str]) -> None:
-    if OBJECTIVE not in OBJECTIVE_CHOICES:
+def _validate_feature_config(
+    catalog: list[str],
+    *,
+    objective: str,
+    gap_mode: str,
+    gap_penalty: float,
+) -> None:
+    if objective not in OBJECTIVE_CHOICES:
         raise ValueError(
-            f"OBJECTIVE must be one of {OBJECTIVE_CHOICES}; got {OBJECTIVE!r}."
+            f"OBJECTIVE must be one of {OBJECTIVE_CHOICES}; got {objective!r}."
         )
-    normalize_gap_mode(GAP_MODE)
-    if float(GAP_PENALTY) < 0:
-        raise ValueError(f"GAP_PENALTY must be >= 0; got {GAP_PENALTY!r}.")
+    normalize_gap_mode(gap_mode)
+    if float(gap_penalty) < 0:
+        raise ValueError(f"GAP_PENALTY must be >= 0; got {gap_penalty!r}.")
     if not catalog:
         raise ValueError(
             "enabled_features() is empty. Populate ORIGINAL_FEATURES / "
@@ -254,34 +316,9 @@ def _validate_feature_config(catalog: list[str]) -> None:
         )
 
 
-def main() -> None:
-    if not FILTER_PATH.is_file():
-        raise FileNotFoundError(
-            f"Missing {FILTER_PATH}. Run `python feat_filter.py` first."
-        )
-    catalog = enabled_features()
-    _validate_feature_config(catalog)
-
-    table = pd.read_csv(FILTER_PATH)
-    pool = build_search_pool(
-        table,
-        whitelist=FEATURE_WHITELIST,
-        blacklist=FEATURE_BLACKLIST,
-        include_suggest=INCLUDE_SUGGEST,
-        catalog=catalog,
-    )
-    pairs = _selected_specs()
-    events = _load_events(list(catalog))
-
-    if int(PREPROCESS_CACHE_MAX) < 1:
-        raise ValueError(
-            f"PREPROCESS_CACHE_MAX must be >= 1; got {PREPROCESS_CACHE_MAX!r}."
-        )
-    preprocess_cache: BoundedPreprocessCache = BoundedPreprocessCache(
-        PREPROCESS_CACHE_MAX
-    )
+def _shared_from_pairs(pairs: list[tuple[FamilySpec, str]]) -> dict:
     first_spec = pairs[0][0]
-    shared = {
+    return {
         "TARGET": first_spec.config.TARGET,
         "BENCHMARK_SOURCE": first_spec.config.BENCHMARK_SOURCE,
         "MARKET_TICKER": first_spec.config.MARKET_TICKER,
@@ -293,36 +330,161 @@ def main() -> None:
         "RANDOM_STATE": int(first_spec.config.RANDOM_STATE),
     }
 
+
+def _prefixed_best_row(
+    row: pd.DataFrame,
+    *,
+    row_prefix: dict[str, str] | None,
+    append_best: bool,
+) -> pd.DataFrame:
+    """Attach optional prefix columns; widen to batch schema when appending."""
+    out = row.copy()
+    if row_prefix:
+        for key in ("suggest", "gap", "objective"):
+            if key in row_prefix:
+                out.insert(0, key, row_prefix[key])
+    if append_best:
+        for col in BATCH_BEST_COLUMNS:
+            if col not in out.columns:
+                out[col] = pd.NA
+        out = out.loc[:, list(BATCH_BEST_COLUMNS)]
+    return out
+
+
+def run_feat_optuna(
+    *,
+    objective: str = OBJECTIVE,
+    gap_mode: str = GAP_MODE,
+    include_suggest: Sequence[str] | None = None,
+    gap_penalty: float = GAP_PENALTY,
+    events: pd.DataFrame | None = None,
+    catalog: list[str] | None = None,
+    pairs: list[tuple[FamilySpec, str]] | None = None,
+    preprocess_cache: BoundedPreprocessCache | None = None,
+    best_path: Path | None = None,
+    trial_path: Path | None = None,
+    config_path: Path | None = None,
+    row_prefix: dict[str, str] | None = None,
+    skip_models: set[tuple[str, str]] | None = None,
+    append_best: bool = False,
+    write_config: bool = True,
+    clear_best_path: bool | None = None,
+    print_summary: bool = True,
+    model_bar: Any | None = None,
+    trial_bar: Any | None = None,
+) -> pd.DataFrame:
+    """Run feature search for configured models; return concatenated best rows.
+
+    When ``append_best`` is True, each finished model appends one prefixed row
+    to ``best_path`` (batch mode). Otherwise the best table is rewritten after
+    each model (single-run mode).
+
+    Pass both ``model_bar`` and ``trial_bar`` to reuse an outer ``sticky_stack``
+    (e.g. batch cell + model + trial). Otherwise a local two-bar stack is used.
+    """
+    external_bars = model_bar is not None or trial_bar is not None
+    if external_bars and (model_bar is None or trial_bar is None):
+        raise ValueError("Pass both model_bar and trial_bar, or neither.")
+
+    if not FILTER_PATH.is_file():
+        raise FileNotFoundError(
+            f"Missing {FILTER_PATH}. Run `python feat_filter.py` first."
+        )
+
+    objective = str(objective)
+    gap_mode = normalize_gap_mode(gap_mode)
+    gap_penalty = float(gap_penalty)
+    suggest = list(INCLUDE_SUGGEST if include_suggest is None else include_suggest)
+    skip_models = skip_models or set()
+
+    if catalog is None:
+        catalog = enabled_features()
+    else:
+        catalog = list(catalog)
+    _validate_feature_config(
+        catalog,
+        objective=objective,
+        gap_mode=gap_mode,
+        gap_penalty=gap_penalty,
+    )
+
+    table = pd.read_csv(FILTER_PATH)
+    pool = build_search_pool(
+        table,
+        whitelist=FEATURE_WHITELIST,
+        blacklist=FEATURE_BLACKLIST,
+        include_suggest=suggest,
+        catalog=catalog,
+    )
+    if pairs is None:
+        pairs = _selected_specs()
+    if not pairs:
+        raise ValueError("No models selected.")
+    if events is None:
+        events = _load_events(list(catalog))
+
+    if preprocess_cache is None:
+        if int(PREPROCESS_CACHE_MAX) < 1:
+            raise ValueError(
+                f"PREPROCESS_CACHE_MAX must be >= 1; got {PREPROCESS_CACHE_MAX!r}."
+            )
+        preprocess_cache = BoundedPreprocessCache(PREPROCESS_CACHE_MAX)
+
+    shared = _shared_from_pairs(pairs)
     trial_total = planned_trial_count(
         pool, n_trials=N_TRIALS, exhaustive_max=EXHAUSTIVE_MAX
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    trial_path = Path(OUTPUT_DIR) / "feat_optuna_trial.csv"
-    best_path = Path(OUTPUT_DIR) / "feat_optuna.csv"
-    config_path = Path(OUTPUT_DIR) / "config_optuna.json"
-    write_compact_json(config_path, _snapshot(shared=shared))
-    stale_best = Path(OUTPUT_DIR) / "feat_optuna_best.csv"
-    if stale_best.exists():
-        stale_best.unlink()
-    # Fresh run: clear previous best / trial artifacts before streaming rows.
-    if best_path.exists():
-        best_path.unlink()
-    if SAVE_TRIALS and trial_path.exists():
-        trial_path.unlink()
+    trial_path = Path(trial_path or (OUTPUT_DIR / "feat_optuna_trial.csv"))
+    best_path = Path(best_path or (OUTPUT_DIR / "feat_optuna.csv"))
+    config_path = Path(config_path or (OUTPUT_DIR / "config_optuna.json"))
 
+    if write_config:
+        write_compact_json(
+            config_path,
+            _snapshot(
+                shared=shared,
+                objective=objective,
+                gap_mode=gap_mode,
+                gap_penalty=gap_penalty,
+                include_suggest=suggest,
+            ),
+        )
+
+    if clear_best_path is None:
+        clear_best_path = not append_best
+    if clear_best_path and best_path.exists():
+        best_path.unlink()
+    if not append_best:
+        stale_best = Path(OUTPUT_DIR) / "feat_optuna_best.csv"
+        if stale_best.exists():
+            stale_best.unlink()
+        if SAVE_TRIALS and trial_path.exists():
+            trial_path.unlink()
+
+    active_pairs = [
+        (spec, model_type)
+        for spec, model_type in pairs
+        if (spec.name, model_type) not in skip_models
+    ]
     best_rows: list[pd.DataFrame] = []
     best_cols: list[str] | None = None
-    # Keep model-run order in feat_optuna.csv (no cross-model metric sort).
     required = (
         "n_val",
-        train_column(OBJECTIVE),
-        objective_column(OBJECTIVE),
+        train_column(objective),
+        objective_column(objective),
         SELECTION_SCORE_COLUMN,
     )
 
-    with sticky_stack((len(pairs), max(trial_total, 1))) as (model_bar, trial_bar):
-        for spec, model_type in pairs:
+    if not active_pairs:
+        return pd.DataFrame()
+
+    def _run_models(model_bar: Any | None, trial_bar: Any | None) -> None:
+        nonlocal best_cols
+        if model_bar is not None:
+            model_bar.reset(total=len(active_pairs))
+        for spec, model_type in active_pairs:
             if model_bar is not None:
                 model_bar.set_description_str(f"{model_type} ", refresh=True)
             if trial_bar is not None:
@@ -336,13 +498,13 @@ def main() -> None:
                 n_trials=N_TRIALS,
                 exhaustive_max=EXHAUSTIVE_MAX,
                 random_state=RANDOM_STATE,
-                objective=OBJECTIVE,
-                gap_penalty=GAP_PENALTY,
-                gap_mode=GAP_MODE,
+                objective=objective,
+                gap_penalty=gap_penalty,
+                gap_mode=gap_mode,
                 trial_bar=trial_bar,
                 preprocess_cache=preprocess_cache,
             )
-            marked = mark_best_per_model(block, objective=OBJECTIVE)
+            marked = mark_best_per_model(block, objective=objective)
             missing = [col for col in required if col not in marked.columns]
             if missing:
                 raise ValueError(
@@ -350,7 +512,7 @@ def main() -> None:
                 )
             if best_cols is None:
                 best_cols = [
-                    col for col in _best_columns(OBJECTIVE) if col in marked.columns
+                    col for col in _best_columns(objective) if col in marked.columns
                 ]
             row = marked.loc[marked["best"] == 1, best_cols]
             if len(row) != 1:
@@ -358,9 +520,22 @@ def main() -> None:
                     f"Expected exactly one best row for model {model_type!r}; "
                     f"got {len(row)}."
                 )
-            best_rows.append(row)
-            best = pd.concat(best_rows, axis=0, ignore_index=True)
-            best.to_csv(best_path, index=False, float_format="%.4f")
+            out_row = _prefixed_best_row(
+                row, row_prefix=row_prefix, append_best=append_best
+            )
+            best_rows.append(out_row)
+
+            if append_best:
+                out_row.to_csv(
+                    best_path,
+                    mode="a",
+                    header=not best_path.exists(),
+                    index=False,
+                    float_format="%.4f",
+                )
+            else:
+                best = pd.concat(best_rows, axis=0, ignore_index=True)
+                best.to_csv(best_path, index=False, float_format="%.4f")
 
             if SAVE_TRIALS:
                 marked.to_csv(
@@ -371,46 +546,61 @@ def main() -> None:
                     float_format="%.4f",
                 )
 
-            # Drop retained preprocess frames before the next model.
             preprocess_cache.clear()
             gc.collect()
             if model_bar is not None:
                 model_bar.update(1)
 
-    if not best_rows or best_cols is None:
+    if external_bars:
+        _run_models(model_bar, trial_bar)
+    else:
+        with sticky_stack((len(active_pairs), max(trial_total, 1))) as (
+            local_model_bar,
+            local_trial_bar,
+        ):
+            _run_models(local_model_bar, local_trial_bar)
+
+    if not best_rows:
         raise RuntimeError("No models produced best rows.")
     best = pd.concat(best_rows, axis=0, ignore_index=True)
 
-    display = best.copy()
-    format_cols = (
-        *SUMMARY_METRIC_COLUMNS,
-        train_column(OBJECTIVE),
-        objective_column(OBJECTIVE),
-        SELECTION_SCORE_COLUMN,
-    )
-    for column in format_cols:
-        if column not in display.columns:
-            continue
-        display[column] = display[column].map(
-            lambda value: f"{float(value):.4f}" if pd.notna(value) else ""
+    if print_summary and not append_best:
+        display = best.copy()
+        format_cols = (
+            *SUMMARY_METRIC_COLUMNS,
+            train_column(objective),
+            objective_column(objective),
+            SELECTION_SCORE_COLUMN,
         )
-    print()
-    with pd.option_context(
-        "display.max_columns",
-        None,
-        "display.width",
-        None,
-        "display.expand_frame_repr",
-        False,
-        "display.max_colwidth",
-        None,
-    ):
-        print(display.to_string(index=False))
-    print()
-    if SAVE_TRIALS:
-        print(f"[WROTE] {trial_path}")
-    print(f"[WROTE] {best_path}")
-    print(f"[WROTE] {config_path}")
+        for column in format_cols:
+            if column not in display.columns:
+                continue
+            display[column] = display[column].map(
+                lambda value: f"{float(value):.4f}" if pd.notna(value) else ""
+            )
+        print()
+        with pd.option_context(
+            "display.max_columns",
+            None,
+            "display.width",
+            None,
+            "display.expand_frame_repr",
+            False,
+            "display.max_colwidth",
+            None,
+        ):
+            print(display.to_string(index=False))
+        print()
+        if SAVE_TRIALS:
+            print(f"[WROTE] {trial_path}")
+        print(f"[WROTE] {best_path}")
+        print(f"[WROTE] {config_path}")
+
+    return best
+
+
+def main() -> None:
+    run_feat_optuna()
 
 
 if __name__ == "__main__":
