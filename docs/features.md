@@ -2,7 +2,7 @@
 
 Columns that can enter a model. Source tables are in [`dataset.md`](dataset.md). Dates and labels are in [`fields.md`](fields.md).
 
-Two layers: implement under `src/features/`, then list the name in `ORIGINAL_FEATURES` / `ANALYST_FEATURES` / `MACRO_FEATURES` / `ENGINEERED_FEATURES` (comment out to disable). `src.features.enabled_features()` concatenates those groups in that order for `feat_filter` / `feat_optuna` / catalog defaults. `feat_filter.py` screens the catalog into a `suggest` column. `feat_optuna.py` builds its pool as `FEATURE_WHITELIST` first, then feat_filter labels enabled by `INCLUDE_SUGGEST`, excluding `FEATURE_BLACKLIST`. `main.py` trains from top-level `MODELS` (family → model → one or more feature lists; empty skips). Optuna selection metric: validation `OBJECTIVE` (`oos_r2` / `rank_ic` / `quintile_ls`).
+Two layers: implement under `src/features/`, then list the name in `ORIGINAL_FEATURES` / `ANALYST_FEATURES` / `MACRO_FEATURES` / `ENGINEERED_FEATURES` (comment out to disable). `src.features.enabled_features()` concatenates those groups in that order for `feat_filter` / `feat_optuna` / catalog defaults. `feat_filter.py` screens the catalog into a `suggest` column. `feat_optuna.py` builds its pool as `FEATURE_WHITELIST` first, then feat_filter labels enabled by `INCLUDE_SUGGEST`, excluding `FEATURE_BLACKLIST`. `main.py` trains from `config_main.py` `MODELS` (family → model → one or more feature lists; empty skips). Optuna selection: `GAP_MODE` `none` | `abs` | `pos` with `GAP_PENALTY` on val `OBJECTIVE` (`oos_r2` / `rank_ic` / `quintile_ls`); pools ≤ `EXHAUSTIVE_MAX` are fully enumerated.
 
 Attach order on the aligned panel: benchmark, then macro, then derived analyst ratings, then engineered columns.
 

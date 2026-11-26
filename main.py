@@ -1,6 +1,6 @@
 """Train IMP models with per-model feature combinations.
 
-Edit ``MODELS`` / ``VERBOSE_PRINT`` / ``SAVE_PREDICTIONS`` below, then:
+Edit ``MODELS`` in ``config_main.py``, and knobs below, then:
 
     python main.py
 
@@ -20,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from config.config import EARNINGS_FILE, SENTIMENT_FILE, STOCK_FILE
+from config_main import MODELS
 from src.compact_json import write_compact_json
 from src.features import registered_features
 from src.metrics import print_summary_table
@@ -36,49 +37,11 @@ VERBOSE_PRINT = False
 # True: write output/main_predictions.parquet alongside main_metrics.csv.
 SAVE_PREDICTIONS = False
 
-# family → model → one feature list, or a list of feature lists (multi-combo).
-# Empty list = skip that model. A flat list is treated as a single combination.
-MODELS: dict[str, dict[str, list]] = {
-    "lin": {
-        "ols": [
-            ['log_mcap','vol_21d','vix','dxy','QScoreTrendLong','QScoreSpeedLong'],
-        ],
-        "ridge": [
-            ['log_mcap','vol_21d','vix','dxy','QScoreTrendLong','QScoreSpeedLong'],
-        ],
-        "lasso": [
-            ['par_mkt','vix','dxy','mom_21d','QScoreSpeedLong'],
-        ],
-    },
-    "tr": {
-        "decision_tree": [
-            ['log_mcap','vol_21d','dxy','QScoreTrendLong']
-        ],
-        "random_forest": [
-            ['log_mcap','dxy']
-        ],
-        "hist_gradient_boosting": [
-            ['log_mcap','vol_21d','vix','dxy','QScoreTrendLong']
-        ],
-    },
-    "nn": {
-        "mlp_shallow": [
-            ['log_mcap','mom_21d']
-        ],
-        "mlp": [
-            ['log_mcap','vol_21d','mom_21d']
-        ],
-        "mlp_deep": [
-            ['par_mkt','log_mcap','vol_21d','QScoreSpeedLong']
-        ],
-    },
-}
+# Model feature menus: edit ``MODELS`` in ``config_main.py`` (empty = skip).
 
 # ========================================================================================
 
 _FAMILY_ORDER: tuple[FamilyName, ...] = ("lin", "tr", "nn")
-
-
 def _feature_key(columns: list[str]) -> str:
     """Single-quoted CSV cell, pasteable as a Python list: 'A','B','C'."""
     return ",".join(f"'{name}'" for name in columns)

@@ -250,7 +250,16 @@ def run_one_model(
         fold_metrics,
         predictions=predictions,
     )
-    # Attach val scores for search entrypoints (not written to metrics.csv SUMMARY).
+    # Attach train/val scores for search entrypoints (not written to SUMMARY CSV).
+    if "train" in fold_metrics.index:
+        summary = {
+            **summary,
+            "train_oos_r2": float(fold_metrics.loc["train", "oos_r2"]),
+            "train_rank_ic": float(fold_metrics.loc["train", "rank_ic"]),
+            "train_quintile_ls": float(
+                train_quintile_long_short(predictions, test_fold="train")
+            ),
+        }
     if "val" in fold_metrics.index:
         summary = {
             **summary,
@@ -280,8 +289,8 @@ def score_feature_subset(
 ) -> tuple[dict[str, float | int | str], dict[str, object]]:
     """Fit one model on a column subset; return ``(summary, fit_record)``.
 
-    ``summary`` includes test SUMMARY fields plus ``n_val`` / ``val_oos_r2`` /
-    ``val_rank_ic`` / ``val_quintile_ls``. Preprocess results are cached by
+    ``summary`` includes test SUMMARY fields plus train/val search metrics
+    (``train_*`` / ``n_val`` / ``val_*``). Preprocess results are cached by
     ``(frozenset(columns), family)`` when a cache dict is provided.
     """
     columns = list(feature_columns)

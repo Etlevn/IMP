@@ -9,9 +9,13 @@ labels enabled below; ``FEATURE_BLACKLIST`` is excluded. Edit ``MODELS`` /
 
     python feat_optuna.py
 
-Selection metric is a validation fold score chosen by ``OBJECTIVE``.
-Artifacts: ``output/feat_optuna_trial.csv`` (all trials),
-``output/feat_optuna_best.csv`` (per-model best: n_val + OBJECTIVE val metric + test),
+Selection maximizes ``selection_score`` from ``OBJECTIVE`` on the
+validation fold, with optional train/val gap via ``GAP_MODE`` /
+``GAP_PENALTY`` (test never enters selection). When the searchable pool
+is at most ``EXHAUSTIVE_MAX``, all non-empty subsets are enumerated;
+otherwise Optuna TPE runs ``N_TRIALS`` trials.
+Artifacts: ``output/feat_optuna.csv`` (per-model best), optional
+``output/feat_optuna_trial.csv`` when ``SAVE_TRIALS``, plus
 ``output/config_optuna.json``. Does not modify ``main.py`` outputs.
 """
 
@@ -36,11 +40,14 @@ from src.features import enabled_features
 from src.metrics import SUMMARY_METRIC_COLUMNS
 from src.optuna_search import (
     OBJECTIVE_CHOICES,
+    SELECTION_SCORE_COLUMN,
     build_search_pool,
     mark_best_per_model,
+    normalize_gap_mode,
     objective_column,
     planned_trial_count,
     run_model_search,
+    train_column,
 )
 from src.prepare import sticky_stack
 from src.train import FamilyName, FamilySpec, get_family_spec
@@ -50,7 +57,7 @@ from src.train import FamilyName, FamilySpec, get_family_spec
 
 # Fixed models. Comment out a family or sub-model to skip it.
 MODELS: dict[str, tuple[str, ...]] = {
-    "lin": ("ols", "ridge", "lasso"),
+    "lin": ("ols",),    # ["ols", "ridge", "lasso"]
     "tr": ("decision_tree", "random_forest", "hist_gradient_boosting"),
     "nn": ("mlp_shallow", "mlp", "mlp_deep"),
 }
@@ -58,14 +65,26 @@ MODELS: dict[str, tuple[str, ...]] = {
 # Which feat_filter ``suggest`` labels enter the pool after FEATURE_WHITELIST.
 INCLUDE_SUGGEST: list[str] = ["keep", "weak","noise"]    # ["keep", "weak", "noise", "redundant", "drop"]
 
-# Validation metric to maximize. One of: "oos_r2" | "rank_ic" | "quintile_ls".
+# Validation metric inside the selection score. One of: "oos_r2" | "rank_ic" | "quintile_ls".
 OBJECTIVE: str = "oos_r2"
+
+# How train/val enter selection_score. One of:
+#   "none" → pure val (GAP_PENALTY ignored)
+#   "abs"  → val - GAP_PENALTY * |train - val|
+#   "pos"  → val - GAP_PENALTY * max(0, val - train)
+GAP_MODE: str = "abs"
+
+# Gap weight for "abs" / "pos". Allowed: float >= 0.
+GAP_PENALTY = 1.0
 
 # Optuna trials per model when the searchable pool is larger than EXHAUSTIVE_MAX.
 N_TRIALS = 120
 
 # If len(searchable) <= this, enumerate all subsets instead of Optuna (2^n-1 subsets).
-EXHAUSTIVE_MAX = 6
+EXHAUSTIVE_MAX = 8
+
+# True: write output/feat_optuna_trial.csv (all trials). False: skip it.
+SAVE_TRIALS = False
 
 FILTER_PATH = OUTPUT_DIR / "feat_filter.csv"
 
@@ -75,14 +94,16 @@ _FAMILY_ORDER: tuple[FamilyName, ...] = ("lin", "tr", "nn")
 
 
 def _best_columns(objective: str) -> tuple[str, ...]:
-    """Best-table columns: ids, n_val + OBJECTIVE val metric, then test SUMMARY."""
+    """Best-table columns: ids, train/val/score, then test SUMMARY."""
     return (
         "family",
         "model",
         "features",
         "n_features",
         "n_val",
+        train_column(objective),
         objective_column(objective),
+        SELECTION_SCORE_COLUMN,
         "n_test",
         *SUMMARY_METRIC_COLUMNS,
     )
@@ -149,8 +170,13 @@ def _snapshot(*, shared: dict) -> dict:
     return {
         "objective": OBJECTIVE,
         "objective_column": objective_column(OBJECTIVE),
+        "train_column": train_column(OBJECTIVE),
+        "selection_score": SELECTION_SCORE_COLUMN,
+        "gap_mode": normalize_gap_mode(GAP_MODE),
+        "gap_penalty": float(GAP_PENALTY),
         "n_trials": N_TRIALS,
         "exhaustive_max": EXHAUSTIVE_MAX,
+        "save_trials": bool(SAVE_TRIALS),
         "include_suggest": list(INCLUDE_SUGGEST),
         "feature_whitelist": list(FEATURE_WHITELIST),
         "feature_blacklist": list(FEATURE_BLACKLIST),
@@ -166,6 +192,9 @@ def _validate_feature_config(catalog: list[str]) -> None:
         raise ValueError(
             f"OBJECTIVE must be one of {OBJECTIVE_CHOICES}; got {OBJECTIVE!r}."
         )
+    normalize_gap_mode(GAP_MODE)
+    if float(GAP_PENALTY) < 0:
+        raise ValueError(f"GAP_PENALTY must be >= 0; got {GAP_PENALTY!r}.")
     if not catalog:
         raise ValueError(
             "enabled_features() is empty. Populate ORIGINAL_FEATURES / "
@@ -245,6 +274,8 @@ def main() -> None:
                 exhaustive_max=EXHAUSTIVE_MAX,
                 random_state=RANDOM_STATE,
                 objective=OBJECTIVE,
+                gap_penalty=GAP_PENALTY,
+                gap_mode=GAP_MODE,
                 trial_bar=trial_bar,
                 preprocess_cache=preprocess_cache,
             )
@@ -258,11 +289,18 @@ def main() -> None:
     )
     best_cols = [col for col in _best_columns(OBJECTIVE) if col in metrics.columns]
     missing = [
-        col for col in ("n_val", objective_column(OBJECTIVE)) if col not in metrics.columns
+        col
+        for col in (
+            "n_val",
+            train_column(OBJECTIVE),
+            objective_column(OBJECTIVE),
+            SELECTION_SCORE_COLUMN,
+        )
+        if col not in metrics.columns
     ]
     if missing:
         raise ValueError(f"metrics missing columns for best table: {missing}.")
-    sort_col = OBJECTIVE  # test column matching the val OBJECTIVE
+    sort_col = OBJECTIVE  # test column matching the val OBJECTIVE (display only)
     if sort_col not in metrics.columns:
         raise ValueError(f"metrics missing test column {sort_col!r} for OBJECTIVE.")
     best = (
@@ -273,15 +311,24 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     trial_path = Path(OUTPUT_DIR) / "feat_optuna_trial.csv"
-    best_path = Path(OUTPUT_DIR) / "feat_optuna_best.csv"
+    best_path = Path(OUTPUT_DIR) / "feat_optuna.csv"
     config_path = Path(OUTPUT_DIR) / "config_optuna.json"
-    metrics.to_csv(trial_path, index=False, float_format="%.4f")
+    if SAVE_TRIALS:
+        metrics.to_csv(trial_path, index=False, float_format="%.4f")
     best.to_csv(best_path, index=False, float_format="%.4f")
     write_compact_json(config_path, _snapshot(shared=shared))
+    stale_best = Path(OUTPUT_DIR) / "feat_optuna_best.csv"
+    if stale_best.exists():
+        stale_best.unlink()
 
     display = best.copy()
-    val_col = objective_column(OBJECTIVE)
-    for column in (*SUMMARY_METRIC_COLUMNS, val_col):
+    format_cols = (
+        *SUMMARY_METRIC_COLUMNS,
+        train_column(OBJECTIVE),
+        objective_column(OBJECTIVE),
+        SELECTION_SCORE_COLUMN,
+    )
+    for column in format_cols:
         if column not in display.columns:
             continue
         display[column] = display[column].map(
@@ -300,7 +347,8 @@ def main() -> None:
     ):
         print(display.to_string(index=False))
     print()
-    print(f"[WROTE] {trial_path}")
+    if SAVE_TRIALS:
+        print(f"[WROTE] {trial_path}")
     print(f"[WROTE] {best_path}")
     print(f"[WROTE] {config_path}")
 

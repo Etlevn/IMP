@@ -10,7 +10,7 @@ Predict post-earnings stock behavior from information available **before** the a
 - NYSE session alignment with BMO / AMC return anchors; decision day = anchor − 2
 - Fixed announcement / post windows and market-adjusted returns versus the configured benchmark (`equal` by default)
 - Train / val / test by calendar date; impute and scale **on train only**
-- Multi-model runs via `main.py` (`MODELS`: family → model → feature combo(s); empty = skip) with `output/` artifacts
+- Multi-model runs via `main.py` / `config_main.py` (`MODELS`: family → model → feature combo(s); empty = skip) with `output/` artifacts
 
 ## Setup
 
@@ -71,7 +71,7 @@ python script/run_feature.py       # build df + descriptive report
 python script/run_preprocess.py    # split + train-only impute / scale
 python script/export_universe.py   # write data/stock_universe.csv (see USE_WRDS in script)
 
-python main.py                     # edit MODELS = {family: {model: [features...]}}
+python main.py                     # edit config_main.py MODELS = {family: {model: [features...]}}
 python feat_filter.py              # train-fold feature screen → feat_filter.csv + config_filter.json
 python feat_optuna.py              # per-model feature search → feat_optuna_{trial,best}.csv
 ```
@@ -126,7 +126,7 @@ HistGBDT / MLP do not use sklearn’s random `validation_fraction` holdout from 
 | tr     | `config/config_tr.py`  | `decision_tree`, `random_forest`, `hist_gradient_boosting` |
 | nn     | `config/config_nn.py`  | `mlp_shallow`, `mlp`, `mlp_deep`                           |
 
-Select runs in `main.py` (`MODELS`: each model lists one or more feature combinations; `[]` skips). Classification (`dir_ann`) is reserved. Shared target / cuts: `config/config.py`.
+Select runs in `config_main.py` (`MODELS`: each model lists one or more feature combinations; `[]` skips). Classification (`dir_ann`) is reserved. Shared target / cuts: `config/config.py`.
 
 ## Metrics and outputs
 

@@ -15,16 +15,71 @@ from src.pipeline import score_feature_subset
 from src.train import FamilySpec
 
 OBJECTIVE_CHOICES: tuple[str, ...] = ("oos_r2", "rank_ic", "quintile_ls")
+# none = pure val; abs = λ·|train−val|; pos = λ·max(0, val−train).
+GAP_MODE_CHOICES: tuple[str, ...] = ("none", "abs", "pos")
+SELECTION_SCORE_COLUMN = "selection_score"
 
 
 def objective_column(objective: str) -> str:
-    """Map a public OBJECTIVE name to the val column used for selection."""
+    """Map a public OBJECTIVE name to the val column used for reporting."""
     name = str(objective).strip()
     if name not in OBJECTIVE_CHOICES:
         raise ValueError(
             f"Unknown OBJECTIVE={objective!r}; expected one of {OBJECTIVE_CHOICES}."
         )
     return f"val_{name}"
+
+
+def train_column(objective: str) -> str:
+    """Map a public OBJECTIVE name to the train-fold column."""
+    name = str(objective).strip()
+    if name not in OBJECTIVE_CHOICES:
+        raise ValueError(
+            f"Unknown OBJECTIVE={objective!r}; expected one of {OBJECTIVE_CHOICES}."
+        )
+    return f"train_{name}"
+
+
+def normalize_gap_mode(gap_mode: str) -> str:
+    name = str(gap_mode).strip().lower()
+    if name not in GAP_MODE_CHOICES:
+        raise ValueError(
+            f"Unknown GAP_MODE={gap_mode!r}; expected one of {GAP_MODE_CHOICES}."
+        )
+    return name
+
+
+def selection_score(
+    *,
+    val_metric: float,
+    train_metric: float,
+    gap_penalty: float,
+    gap_mode: str = "abs",
+) -> float:
+    """Val metric minus an optional train/val gap penalty (test never enters).
+
+    ``gap_mode``:
+    - ``none``: pure ``val_metric`` (``gap_penalty`` ignored)
+    - ``abs``: ``val - λ * |train - val|``
+    - ``pos``: ``val - λ * max(0, val - train)``
+    """
+    if not np.isfinite(val_metric):
+        return float("-inf")
+    mode = normalize_gap_mode(gap_mode)
+    if mode == "none":
+        return float(val_metric)
+    penalty = float(gap_penalty)
+    if penalty < 0:
+        raise ValueError(f"gap_penalty must be >= 0; got {gap_penalty!r}.")
+    if penalty == 0 or not np.isfinite(train_metric):
+        return float(val_metric)
+    val = float(val_metric)
+    train = float(train_metric)
+    if mode == "abs":
+        gap = abs(train - val)
+    else:  # pos
+        gap = max(0.0, val - train)
+    return val - penalty * gap
 
 
 def screen_from_suggest_column(table: pd.DataFrame) -> dict[str, list[str]]:
@@ -150,7 +205,18 @@ def _trial_row(
     trial: int,
     columns: Sequence[str],
     summary: dict[str, float | int | str],
+    objective: str,
+    gap_penalty: float,
+    gap_mode: str,
 ) -> dict[str, object]:
+    train_oos = float(summary.get("train_oos_r2", float("nan")))
+    train_rank = float(summary.get("train_rank_ic", float("nan")))
+    train_q = float(summary.get("train_quintile_ls", float("nan")))
+    val_oos = float(summary.get("val_oos_r2", float("nan")))
+    val_rank = float(summary.get("val_rank_ic", float("nan")))
+    val_q = float(summary.get("val_quintile_ls", float("nan")))
+    train_metric = float(summary.get(train_column(objective), float("nan")))
+    val_metric = float(summary.get(objective_column(objective), float("nan")))
     return {
         "family": family,
         "model": model,
@@ -158,9 +224,18 @@ def _trial_row(
         "features": _feature_key(columns),
         "n_features": len(columns),
         "n_val": int(summary.get("n_val", 0)),
-        "val_oos_r2": float(summary.get("val_oos_r2", float("nan"))),
-        "val_rank_ic": float(summary.get("val_rank_ic", float("nan"))),
-        "val_quintile_ls": float(summary.get("val_quintile_ls", float("nan"))),
+        "train_oos_r2": train_oos,
+        "train_rank_ic": train_rank,
+        "train_quintile_ls": train_q,
+        "val_oos_r2": val_oos,
+        "val_rank_ic": val_rank,
+        "val_quintile_ls": val_q,
+        SELECTION_SCORE_COLUMN: selection_score(
+            val_metric=val_metric,
+            train_metric=train_metric,
+            gap_penalty=gap_penalty,
+            gap_mode=gap_mode,
+        ),
         "n_test": int(summary.get("n_test", 0)),
         "oos_r2": float(summary.get("oos_r2", float("nan"))),
         "rank_ic": float(summary.get("rank_ic", float("nan"))),
@@ -198,13 +273,20 @@ def run_model_search(
     exhaustive_max: int,
     random_state: int,
     objective: str = "oos_r2",
+    gap_penalty: float = 1.0,
+    gap_mode: str = "abs",
     trial_bar: Any | None = None,
     preprocess_cache: dict[tuple[frozenset[str], str], Any] | None = None,
 ) -> pd.DataFrame:
     """Search feature subsets for one model; return trial rows (best unmarked)."""
     import optuna
 
-    score_col = objective_column(objective)
+    mode = normalize_gap_mode(gap_mode)
+    if float(gap_penalty) < 0:
+        raise ValueError(f"gap_penalty must be >= 0; got {gap_penalty!r}.")
+    # Validate objective names up front.
+    objective_column(objective)
+    train_column(objective)
     family = str(spec.name)
     searchable = list(pool.searchable)
     if not searchable:
@@ -226,16 +308,18 @@ def run_model_search(
             events=events,
             preprocess_cache=cache,
         )
-        rows.append(
-            _trial_row(
-                family=family,
-                model=model_type,
-                trial=trial_id,
-                columns=columns,
-                summary=summary,
-            )
+        row = _trial_row(
+            family=family,
+            model=model_type,
+            trial=trial_id,
+            columns=columns,
+            summary=summary,
+            objective=objective,
+            gap_penalty=gap_penalty,
+            gap_mode=mode,
         )
-        value = float(summary.get(score_col, float("nan")))
+        rows.append(row)
+        value = float(row[SELECTION_SCORE_COLUMN])
         if not np.isfinite(value):
             return float("-inf")
         return value
@@ -276,14 +360,19 @@ def mark_best_per_model(
     *,
     objective: str = "oos_r2",
 ) -> pd.DataFrame:
-    """Flag the highest validation-objective trial within each model; sort."""
+    """Flag the highest selection_score trial within each model; sort."""
     if metrics.empty:
         return metrics
-    score_col = objective_column(objective)
-    if score_col not in metrics.columns:
-        raise ValueError(f"metrics missing objective column {score_col!r}.")
+    if SELECTION_SCORE_COLUMN not in metrics.columns:
+        raise ValueError(
+            f"metrics missing {SELECTION_SCORE_COLUMN!r}; "
+            "re-run feat_optuna after upgrading src.optuna_search."
+        )
+    # Keep objective validation for callers that still pass OBJECTIVE.
+    objective_column(objective)
     out = metrics.copy()
     out["best"] = 0
+    score_col = SELECTION_SCORE_COLUMN
     for model, group in out.groupby("model", sort=False):
         idx = group[score_col].astype(float).idxmax()
         out.loc[idx, "best"] = 1

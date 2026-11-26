@@ -98,22 +98,23 @@ SUMMARY and `main_metrics.csv` keep `family`, `model`, `n_test`, then
 The comparison order is `oos_r2`, then `rank_ic`, then `quintile_ls`.
 Baseline errors, `top_minus_bottom`, and model parameters stay out of that table.
 
-`feat_optuna_trial.csv` stores every Optuna / exhaustive trial with
-validation scores (`n_val`, `val_oos_r2`, …), test SUMMARY columns, and a
-per-model `best` flag. Selection metric is `feat_optuna.OBJECTIVE`
-(`oos_r2` | `rank_ic` | `quintile_ls`); rows sort by model then that val column
-descending. `feat_optuna_best.csv` keeps only `best=1` rows with
-`family`, `model`, `features`, `n_features`, `n_val`, the OBJECTIVE val
-column (`val_oos_r2` / `val_rank_ic` / `val_quintile_ls`), `n_test`, then
-SUMMARY metrics. Companion config (`config_optuna.json`) stores search
-settings only, not trial or best rows.
+`feat_optuna.csv` keeps per-model `best=1` rows (train/val/score + test
+SUMMARY). Optional `feat_optuna_trial.csv` (when `SAVE_TRIALS`) stores every
+Optuna / exhaustive trial with train/val scores, `selection_score`, test
+SUMMARY columns, and a `best` flag. Selection maximizes
+`selection_score` from `feat_optuna.OBJECTIVE` (`oos_r2` | `rank_ic` |
+`quintile_ls`) with `GAP_MODE`: `none` (pure val), `abs`
+(`val - λ|train-val|`), or `pos` (`val - λ·max(0, val-train)`);
+`GAP_PENALTY` is λ. Test never enters selection. Pools with width at most
+`EXHAUSTIVE_MAX` are fully enumerated. Companion config
+(`config_optuna.json`) stores search settings only, not trial or best rows.
 
 | File                  | Contents                                                                 |
 | --------------------- | ------------------------------------------------------------------------ |
 | `main_metrics.csv`    | SUMMARY rows with `family` / metrics / trailing `features`; sorted by `SORT_BY` |
 | `feat_filter.csv`     | Train-fold screen rows (`suggest` + IC / corr) |
-| `feat_optuna_trial.csv` | Per-trial search rows (`val_*` + test metrics, `best`) |
-| `feat_optuna_best.csv`  | Per-model best: `n_val` + OBJECTIVE `val_*` + test SUMMARY |
+| `feat_optuna.csv` | Per-model best: train/val/score + test SUMMARY |
+| `feat_optuna_trial.csv` | All trials when `SAVE_TRIALS` (`train_*` / `val_*` / `selection_score` + test, `best`) |
 | `main_predictions.parquet` | Per-event predictions (`SAVE_PREDICTIONS` in `main.py`) |
 | `config_main.json` | `main.py` settings: `shared` + `runs[]` (`model` / `family` / `features` + used hypers; no fits) |
 | `config_filter.json` | `feat_filter.py` settings only (thresholds / features / shared; no rows) |
