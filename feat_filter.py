@@ -55,7 +55,7 @@ from src.preprocess import chronological_split, drop_missing_target
 MISSING_DROP = 0.20
 
 # Absolute correlation at or above this, and a weaker |Pearson IC|, is redundant. Allowed: float in [0, 1].
-CORR_REDUNDANT = 0.60
+CORR_REDUNDANT = 0.80
 
 # IC noise floor multiplier: ic_noise = IC_NOISE_MULT / sqrt(n_train); (= MULT × SE, where SE ≈ 1/sqrt(n_train)). Allowed: float > 0.
 IC_NOISE_MULT = 1.96
@@ -96,6 +96,9 @@ def _pairwise_ic(x: pd.Series, y: pd.Series) -> tuple[float, float, int]:
     n = int(len(frame))
     if n < 3:
         return float("nan"), float("nan"), n
+    # Constant series → undefined correlation (avoids ConstantInputWarning).
+    if float(frame["x"].std(ddof=0)) == 0.0 or float(frame["y"].std(ddof=0)) == 0.0:
+        return float("nan"), float("nan"), n
     pearson = float(frame["x"].corr(frame["y"], method="pearson"))
     spearman = float(frame["x"].corr(frame["y"], method="spearman"))
     return pearson, spearman, n
@@ -108,17 +111,32 @@ def filter_table(train: pd.DataFrame, features: list[str], target: str) -> pd.Da
         name: pd.to_numeric(train[name], errors="coerce") for name in features
     }
 
-    corr = pd.DataFrame({k: v for k, v in numeric.items()}).corr(method="pearson")
+    # Skip all-NA / zero-variance columns so corr does not emit divide warnings.
+    corr_cols = [
+        name
+        for name, series in numeric.items()
+        if int(series.notna().sum()) >= 2 and float(series.std(ddof=0) or 0.0) > 0.0
+    ]
+    corr = (
+        pd.DataFrame({k: numeric[k] for k in corr_cols}).corr(method="pearson")
+        if corr_cols
+        else pd.DataFrame()
+    )
 
     for name in features:
         x = numeric[name]
         missing_n = int(x.isna().sum())
         n = int(x.notna().sum())
         pearson, spearman, n_ic = _pairwise_ic(x, y)
-        others = [c for c in features if c != name]
-        if others and name in corr.columns:
-            max_abs_other = float(corr.loc[name, others].abs().max())
-            max_abs_other_name = str(corr.loc[name, others].abs().idxmax())
+        others = [c for c in corr_cols if c != name]
+        if others and name in corr.index:
+            row_abs = corr.loc[name, others].abs()
+            if row_abs.notna().any():
+                max_abs_other = float(row_abs.max())
+                max_abs_other_name = str(row_abs.idxmax())
+            else:
+                max_abs_other = float("nan")
+                max_abs_other_name = ""
         else:
             max_abs_other = float("nan")
             max_abs_other_name = ""
@@ -284,7 +302,10 @@ def main() -> None:
             ic_noise=ic_noise,
         ),
     )
+    counts = table["suggest"].value_counts()
+    summary = "  ".join(f"{lab}={int(counts.get(lab, 0))}" for lab in SUGGEST_LABELS)
     print()
+    print(f"[SUMMARY] {summary}")
     print(f"[WROTE] {out_path}")
     print(f"[WROTE] {config_path}")
 

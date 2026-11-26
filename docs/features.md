@@ -2,7 +2,7 @@
 
 Columns that can enter a model. Source tables are in [`dataset.md`](dataset.md). Dates and labels are in [`fields.md`](fields.md).
 
-Two layers: implement under `src/features/`, then list the name in `ORIGINAL_FEATURES` / `ANALYST_FEATURES` / `MACRO_FEATURES` / `ENGINEERED_FEATURES` (comment out to disable). `src.features.enabled_features()` concatenates those groups in that order for `feat_filter` / `feat_optuna` / catalog defaults. `feat_filter.py` screens the catalog into a `suggest` column. `feat_optuna.py` builds its pool as `FEATURE_WHITELIST` first, then feat_filter labels enabled by `INCLUDE_SUGGEST`, excluding `FEATURE_BLACKLIST`. `main.py` trains from `config_main.py` `MODELS` (family → model → one or more feature lists; empty skips). Expanded model menus: lin adds `elasticnet` / `huber` / `quantile`; tr adds `lightgbm` / `xgboost` / `catboost`; nn adds torch `mlp_dropout` / `wide_deep` / `ft_transformer` (see `docs/superpowers/specs/2026-11-25-nine-model-expansion-design.md`). Optuna selection: `GAP_MODE` `none` | `abs` | `pos` with `GAP_PENALTY` on val `OBJECTIVE` (`oos_r2` / `rank_ic` / `quintile_ls`); pools ≤ `EXHAUSTIVE_MAX` are fully enumerated.
+Register under `ORIGINAL_FEATURES` / `ANALYST_FEATURES` / `MACRO_FEATURES` / `IBES_FEATURES` / `COMPUSTAT_FEATURES` / `ENGINEERED_FEATURES` (comment out to disable). `src.features.enabled_features()` concatenates in that order. Yahoo/WRDS groups are **cache-only** at attach time — download first with `script/fetch_macro.py`, `script/fetch_wrds_ibes.py`, `script/fetch_wrds_compustat.py`. `feat_filter.py` screens the catalog into a `suggest` column. `feat_optuna.py` builds its pool as `FEATURE_WHITELIST` first, then feat_filter labels enabled by `INCLUDE_SUGGEST`, excluding `FEATURE_BLACKLIST`. `main.py` trains from `config_main.py` `MODELS` (family → model → one or more feature lists; empty skips). Expanded model menus: lin adds `elasticnet` / `huber` / `quantile`; tr adds `lightgbm` / `xgboost` / `catboost`; nn adds torch `mlp_dropout` / `wide_deep` / `ft_transformer` (see `docs/superpowers/specs/2026-11-25-nine-model-expansion-design.md`). Optuna selection: `GAP_MODE` `none` | `abs` | `pos` with `GAP_PENALTY` on val `OBJECTIVE` (`oos_r2` / `rank_ic` / `quintile_ls`); pools ≤ `EXHAUSTIVE_MAX` are fully enumerated.
 
 Attach order on the aligned panel: benchmark, then macro, then derived analyst ratings, then engineered columns.
 
@@ -45,7 +45,15 @@ Write \(SB, B, H, S, SS\) for the five counts.
 
 ## Macro levels
 
-Yahoo daily close, left-merged on `Date` in `src/features/macro.py`. Cached under `data/macro_daily.*`. These are levels, not returns. A stock row keeps a missing value when that calendar date has no macro print.
+Yahoo daily close, left-merged on `Date` in `src/features/macro.py`. Cached under `data/macro_daily.*` after `python script/fetch_macro.py`. Attach does not call yfinance. Levels, not returns; missing calendar days stay NaN.
+
+## IBES (WRDS)
+
+Fetch: `python script/export_universe.py` then `python script/fetch_wrds_ibes.py` → `data/ibes_features.*`. As-of merge on `TickerId` + `Date` (`asof_date` ≤ panel date). Includes consensus, dispersion, coverage, revisions, lag SUE, beat rate, LTG, etc. (see `IBES_FEATURES` in `config/config.py`).
+
+## Compustat (WRDS)
+
+Fetch: `python script/fetch_wrds_compustat.py` → `data/compustat_features.*`. As-of on report availability (`rdq` or `datadate+45`). Ratios such as `bm`, `roe`, `leverage`, growth, accruals (see `COMPUSTAT_FEATURES`).
 
 | Feature | Definition | Note |
 | --- | --- | --- |

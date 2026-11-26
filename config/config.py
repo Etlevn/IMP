@@ -39,7 +39,8 @@ MARKET_TICKER = ""
 # 2) List them in the groups below. Comment out a name to disable it.
 #    Empty ANALYST / MACRO / ENGINEERED = do not attach that whole group.
 # 3) feat_filter / feat_optuna / main use src.features.enabled_features()
-#    (ORIGINAL → ANALYST → MACRO → ENGINEERED). Panel-native vendor columns belong in ORIGINAL_FEATURES (not computed in src/features/).
+#    (ORIGINAL → ANALYST → MACRO → IBES → COMPUSTAT → ENGINEERED).
+#    Panel-native vendor columns belong in ORIGINAL_FEATURES (not computed in src/features/).
 
 ORIGINAL_FEATURES = [
     "QScoreTrendLong",
@@ -62,6 +63,7 @@ ANALYST_FEATURES = [
 
 # Maps feature column name -> yfinance ticker (src/features/macro.py).
 # Cached under data/macro_daily.parquet (+ .json). Close levels only.
+# Fetch manually: python script/fetch_macro.py — attach only reads cache.
 MACRO_FEATURES = {
     "vix": "^VIX",
     "tnx": "^TNX",
@@ -98,6 +100,40 @@ ENGINEERED_FEATURES = [
     "mom_exmkt_63d",
     "log_mcap",
     "par_mkt",
+]
+
+# IBES (WRDS): cached under data/ibes_features.parquet (+ .json). Empty = skip.
+# Fetch manually: python script/fetch_wrds_ibes.py — attach only reads cache.
+IBES_FEATURES = [
+    "eps_consensus",
+    "eps_dispersion",
+    "eps_coverage",
+    "eps_revision_1m",
+    "eps_revision_3m",
+    "sue_lag1",
+    "sue_lag2",
+    "beat_rate_4q",
+    "rev_surprise_lag1",
+    "ltg",
+    "eps_consensus_chg_std",
+    "days_since_est_update",
+]
+
+# Compustat (WRDS): cached under data/compustat_features.parquet (+ .json). Empty = skip.
+# Fetch manually: python script/fetch_wrds_compustat.py — attach only reads cache.
+COMPUSTAT_FEATURES = [
+    "bm",
+    "roe",
+    "roa",
+    "gross_margin",
+    "asset_growth",
+    "revenue_growth",
+    "leverage",
+    "current_ratio",
+    "accruals",
+    "log_assets",
+    "ep",
+    "fcf_yield",
 ]
 
 # --- experiment ---

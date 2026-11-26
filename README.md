@@ -44,7 +44,9 @@ Place provider Parquet files in `data/` (not redistributed here). Column-level d
 | `stock_universe.csv`                     | One row per `TickerId` for WRDS / external data mapping (see below) |
 | `benchmark_spy.parquet` / `.json`        | Optional Yahoo SPY cache (when `BENCHMARK_SOURCE=yahoo`) |
 | `benchmark_equal|cap.parquet` / `.json`  | Optional universe-index cache (when `BENCHMARK_SOURCE=equal|cap`) |
-| `macro_daily.parquet` / `.json`          | Optional Yahoo macro cache (`MACRO_FEATURES`: 15 Close levels) |
+| `macro_daily.parquet` / `.json`          | Yahoo macro cache (`MACRO_FEATURES`); fetch via `script/fetch_macro.py` |
+| `ibes_features.parquet` / `.json`        | WRDS IBES cache; fetch via `script/fetch_wrds_ibes.py` |
+| `compustat_features.parquet` / `.json`   | WRDS Compustat cache; fetch via `script/fetch_wrds_compustat.py` |
 
 Sample panel used in development: on the order of **~200 U.S. names** with price dates **2020–2024** (ticker/symbol counts are not exact equals; see `docs/dataset.md`). Stock returns use `LastPrice` (adjustment convention not stated in-file).
 
@@ -67,9 +69,15 @@ Same `Symbol` may appear on more than one row; keep those rows when mapping vend
 
 ```bash
 python script/run_data.py          # preview df_all
+python script/export_universe.py   # stock_universe.csv (+ permno/gvkey when USE_WRDS)
+
+# External caches — run manually before feature builds (attach does not download):
+python script/fetch_macro.py              # Yahoo → macro_daily.*
+python script/fetch_wrds_ibes.py          # WRDS → ibes_features.*
+python script/fetch_wrds_compustat.py     # WRDS → compustat_features.*
+
 python script/run_feature.py       # build df + descriptive report
 python script/run_preprocess.py    # split + train-only impute / scale
-python script/export_universe.py   # write data/stock_universe.csv (see USE_WRDS in script)
 
 python main.py                     # edit config_main.py MODELS = {family: {model: [features...]}}
 python feat_filter.py              # train-fold feature screen → feat_filter.csv + config_filter.json

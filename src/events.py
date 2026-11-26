@@ -11,14 +11,18 @@ import pandas as pd
 from config.config import (
     ANALYST_FEATURES as CONFIG_ANALYST_FEATURES,
     BENCHMARK_SOURCE as CONFIG_BENCHMARK_SOURCE,
+    COMPUSTAT_FEATURES as CONFIG_COMPUSTAT_FEATURES,
     ENGINEERED_FEATURES as CONFIG_ENGINEERED_FEATURES,
+    IBES_FEATURES as CONFIG_IBES_FEATURES,
     MACRO_FEATURES as CONFIG_MACRO_FEATURES,
     MARKET_TICKER as CONFIG_MARKET_TICKER,
 )
 from src.features import enabled_features
 from src.benchmark import BENCHMARK_COLUMN, attach_benchmark
 from src.features.analyst import attach_analyst_features
+from src.features.compustat import attach_compustat
 from src.features.engineered import attach_engineered_features
+from src.features.ibes import attach_ibes
 from src.features.macro import attach_macro
 from src.prepare import _row_bar
 from src.sessions import align_trading_sessions
@@ -128,6 +132,8 @@ def build_aligned_panel(
     benchmark_source: str | None = None,
     macro_features: dict[str, str] | None = None,
     analyst_features: list[str] | None = None,
+    ibes_features: list[str] | None = None,
+    compustat_features: list[str] | None = None,
     engineered_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Session-align ``df_all`` and attach each enabled feature group."""
@@ -135,6 +141,12 @@ def build_aligned_panel(
     source = CONFIG_BENCHMARK_SOURCE if benchmark_source is None else benchmark_source
     macros = CONFIG_MACRO_FEATURES if macro_features is None else macro_features
     analyst = CONFIG_ANALYST_FEATURES if analyst_features is None else analyst_features
+    ibes = CONFIG_IBES_FEATURES if ibes_features is None else ibes_features
+    compustat = (
+        CONFIG_COMPUSTAT_FEATURES
+        if compustat_features is None
+        else compustat_features
+    )
     engineered = (
         CONFIG_ENGINEERED_FEATURES
         if engineered_features is None
@@ -151,6 +163,10 @@ def build_aligned_panel(
     )
     df_align = attach_macro(df_align, data_dir=data_dir, macro_features=macros)
     df_align = attach_analyst_features(df_align, analyst_features=analyst)
+    df_align = attach_ibes(df_align, data_dir=data_dir, ibes_features=ibes)
+    df_align = attach_compustat(
+        df_align, data_dir=data_dir, compustat_features=compustat
+    )
     return attach_engineered_features(df_align, engineered_features=engineered)
 
 
@@ -163,6 +179,8 @@ def build_event_table(
     benchmark_source: str | None = None,
     macro_features: dict[str, str] | None = None,
     analyst_features: list[str] | None = None,
+    ibes_features: list[str] | None = None,
+    compustat_features: list[str] | None = None,
     engineered_features: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build training event table ``df``: one row per announcement.
@@ -183,6 +201,8 @@ def build_event_table(
             benchmark_source=benchmark_source,
             macro_features=macro_features,
             analyst_features=analyst_features,
+            ibes_features=ibes_features,
+            compustat_features=compustat_features,
             engineered_features=engineered_features,
         )
     feature_cols = list(
